@@ -1,57 +1,7 @@
 <?php
 // =============================================================================
 // routes/dashboard.php — Dashboard summary stats
-//
-// GET /backend/routes/dashboard.php
-//   → admin:    full summary (headcounts, attendance, dept breakdown, recent logs)
-//   → employee: personal summary (own clock status, hours today, leave balance)
-//
-// Response shape (admin):
-// {
-//   "today":        "2025-06-29",
-//   "headcount": {
-//     "total_employees":  int,
-//     "active_employees": int,
-//     "present_today":    int,
-//     "late_today":       int,
-//     "on_leave_today":   int,
-//     "not_clocked_in":   int
-//   },
-//   "pending_leaves":    int,
-//   "departments": [
-//     {
-//       "department_id":   int,
-//       "department_name": string,
-//       "employee_count":  int,
-//       "present_today":   int,
-//       "late_today":      int
-//     }, ...
-//   ],
-//   "recent_clock_ins": [
-//     {
-//       "log_id":       int,
-//       "employee_id":  int,
-//       "full_name":    string,
-//       "clock_in":     string,
-//       "clock_out":    string|null,
-//       "total_hours":  float|null,
-//       "status_label": string|null,
-//       "category_name":string|null
-//     }, ...     (last 10)
-//   ]
-// }
-//
-// Response shape (employee):
-// {
-//   "today":          "2025-06-29",
-//   "clocked_in":     bool,
-//   "clock_in":       string|null,
-//   "clock_out":      string|null,
-//   "hours_today":    float|null,
-//   "status_label":   string|null,
-//   "pending_leaves": int,
-//   "approved_leaves_this_month": int
-// }
+// UPDATED: Added weekly_attendance for TSK-36 (Attendance Statistics Chart)
 // =============================================================================
 
 declare(strict_types=1);
@@ -84,14 +34,12 @@ if (currentAccessLevel() === 'admin') {
         "SELECT COUNT(*) FROM employees WHERE employment_status = 'Active'"
     )->fetchColumn();
 
-    // Employees who clocked in today (open or closed log)
     $presentToday = (int)$pdo->query(
         "SELECT COUNT(DISTINCT employee_id)
          FROM   time_logs
          WHERE  DATE(clock_in) = '$today'"
     )->fetchColumn();
 
-    // Late arrivals today (status_id = 2 assumed = Late; see attendance_status)
     $lateToday = (int)$pdo->query(
         "SELECT COUNT(DISTINCT tl.employee_id)
          FROM   time_logs tl
@@ -100,7 +48,6 @@ if (currentAccessLevel() === 'admin') {
          AND    LOWER(ast.status_label) LIKE '%late%'"
     )->fetchColumn();
 
-    // On approved leave today
     $onLeaveToday = (int)$pdo->query(
         "SELECT COUNT(DISTINCT employee_id)
          FROM   leave_records
@@ -109,7 +56,6 @@ if (currentAccessLevel() === 'admin') {
          AND    date_to   >= '$today'"
     )->fetchColumn();
 
-    // Active employees who have neither clocked in nor are on leave today
     $notClockedIn = max(0, $activeEmployees - $presentToday - $onLeaveToday);
 
     // ── Pending leave requests ────────────────────────────────────────────────
@@ -168,9 +114,57 @@ if (currentAccessLevel() === 'admin') {
         'category_name' => $r['category_name'],
     ], $recentRows);
 
+    // ── Weekly attendance (TSK-36) ────────────────────────────────────────────
+    // Build Mon–Sun for the current ISO week; count present/late/absent per day.
+    $weekStart = (new DateTime())->modify('Monday this week')->setTime(0, 0, 0);
+    $weeklyAttendance = [];
+
+    for ($i = 0; $i < 7; $i++) {
+        $day      = clone $weekStart;
+        $day->modify("+{$i} days");
+        $dayStr   = $day->format('Y-m-d');
+        $dayLabel = $day->format('D');   // "Mon", "Tue", …
+
+        // Present (clocked in and NOT late)
+        $presentCnt = (int)$pdo->query(
+            "SELECT COUNT(DISTINCT tl.employee_id)
+             FROM   time_logs tl
+             LEFT JOIN attendance_status ast ON ast.status_id = tl.status_id
+             WHERE  DATE(tl.clock_in) = '$dayStr'
+             AND    (ast.status_label IS NULL OR LOWER(ast.status_label) NOT LIKE '%late%')"
+        )->fetchColumn();
+
+        // Late
+        $lateCnt = (int)$pdo->query(
+            "SELECT COUNT(DISTINCT tl.employee_id)
+             FROM   time_logs tl
+             JOIN   attendance_status ast ON ast.status_id = tl.status_id
+             WHERE  DATE(tl.clock_in) = '$dayStr'
+             AND    LOWER(ast.status_label) LIKE '%late%'"
+        )->fetchColumn();
+
+        // Absent = active employees who didn't clock in and weren't on approved leave
+        $approvedLeave = (int)$pdo->query(
+            "SELECT COUNT(DISTINCT employee_id)
+             FROM   leave_records
+             WHERE  leave_status = 'Approved'
+             AND    date_from <= '$dayStr'
+             AND    date_to   >= '$dayStr'"
+        )->fetchColumn();
+        $absentCnt = max(0, $activeEmployees - ($presentCnt + $lateCnt) - $approvedLeave);
+
+        $weeklyAttendance[] = [
+            'day_label' => $dayLabel,
+            'date'      => $dayStr,
+            'present'   => $presentCnt,
+            'late'      => $lateCnt,
+            'absent'    => $absentCnt,
+        ];
+    }
+
     json_ok([
-        'today'           => $today,
-        'headcount'       => [
+        'today'              => $today,
+        'headcount'          => [
             'total_employees'  => $totalEmployees,
             'active_employees' => $activeEmployees,
             'present_today'    => $presentToday,
@@ -178,9 +172,10 @@ if (currentAccessLevel() === 'admin') {
             'on_leave_today'   => $onLeaveToday,
             'not_clocked_in'   => $notClockedIn,
         ],
-        'pending_leaves'  => $pendingLeaves,
-        'departments'     => $departments,
-        'recent_clock_ins'=> $recentClockIns,
+        'pending_leaves'     => $pendingLeaves,
+        'departments'        => $departments,
+        'recent_clock_ins'   => $recentClockIns,
+        'weekly_attendance'  => $weeklyAttendance,    // ← NEW (TSK-36)
     ]);
 }
 
@@ -189,7 +184,6 @@ if (currentAccessLevel() === 'admin') {
 // ─────────────────────────────────────────────────────────────────────────────
 $empId = currentEmployeeId();
 if ($empId === null) {
-    // Account exists but no linked employee record yet
     json_ok([
         'today'                       => $today,
         'clocked_in'                  => false,
@@ -202,7 +196,6 @@ if ($empId === null) {
     ]);
 }
 
-// Today's time log for this employee
 $logStmt = $pdo->prepare(
     "SELECT tl.log_id, tl.clock_in, tl.clock_out, tl.total_hours,
             ast.status_label
@@ -216,14 +209,12 @@ $logStmt = $pdo->prepare(
 $logStmt->execute([$empId, $today]);
 $log = $logStmt->fetch();
 
-// Pending leave requests
 $pLeaveStmt = $pdo->prepare(
     "SELECT COUNT(*) FROM leave_records WHERE employee_id = ? AND leave_status = 'Pending'"
 );
 $pLeaveStmt->execute([$empId]);
 $pendingOwn = (int)$pLeaveStmt->fetchColumn();
 
-// Approved leaves this month
 $monthStart = (new DateTime('first day of this month'))->format('Y-m-d');
 $monthEnd   = (new DateTime('last day of this month'))->format('Y-m-d');
 $aLeaveStmt = $pdo->prepare(

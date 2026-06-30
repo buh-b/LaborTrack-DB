@@ -24,9 +24,9 @@ function getDB(): PDO {
     }
 
     $host = getenv('DB_HOST') ?: 'localhost';
-    $db   = getenv('DB_NAME') ?: '';
-    $user = getenv('DB_USER') ?: '';
-    $pass = getenv('DB_PASS') ?: '';
+    $db   = getenv('DB_NAME') ?: 's25104471_timesheet';
+    $user = getenv('DB_USER') ?: 's25104471_timesheet';
+    $pass = getenv('DB_PASS') ?: 'Qwerty123';
 
     $dsn     = "mysql:host={$host};dbname={$db};charset=utf8mb4";
     $options = [
