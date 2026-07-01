@@ -1,12 +1,9 @@
 <?php
-// =============================================================================
-// routes/departments.php — Department CRUD
-//
-// GET    /backend/routes/departments.php        → list all (auth required)
-// POST   /backend/routes/departments.php        → create (admin only)
-// PUT    /backend/routes/departments.php        → update (admin only)
-// DELETE /backend/routes/departments.php?id=X   → delete (admin only)
-// =============================================================================
+// GET    /backend/routes/departments.php         list all (auth required)
+// POST   /backend/routes/departments.php         create (admin only)
+// PUT    /backend/routes/departments.php         update (admin only)
+// DELETE /backend/routes/departments.php?id=X    delete (admin only)
+
 
 declare(strict_types=1);
 
