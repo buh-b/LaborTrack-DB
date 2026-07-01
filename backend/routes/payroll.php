@@ -1,24 +1,14 @@
 <?php
-// =============================================================================
-// routes/payroll.php — Payroll lifecycle (per department per month)
-//
-// GET  payroll.php?action=periods                        → list all periods (admin)
-// GET  payroll.php?action=periods&department_id=X        → periods for one dept (admin)
-// GET  payroll.php?action=preview&department_id=X&year=Y&month=M
-//                                                        → compute without saving (admin)
-// POST payroll.php?action=generate                       → create Draft period (admin)
-// GET  payroll.php?action=records&period_id=X            → all records in period (admin)
-// PUT  payroll.php?action=record                         → edit one Draft record (admin)
-// POST payroll.php?action=approve&period_id=X            → approve whole period (admin)
-// GET  payroll.php?action=my_history                     → own approved records (employee)
-//
-// Pay formula per employee:
-//   regular_hours  = SUM(total_hours - overtime_hours)  across logs in month
-//   overtime_hours = SUM(overtime_hours)                across logs in month
-//   regular_pay    = regular_hours  × hourly_rate × shift_rate_multiplier (weighted avg)
-//   overtime_pay   = overtime_hours × hourly_rate × overtime_rate_multiplier (weighted avg)
-//   net_pay        = regular_pay + overtime_pay + bonus - deductions
-// =============================================================================
+// list all periods (admin)
+// periods for one dept (admin)
+// 
+// compute without saving (admin)
+// create Draft period (admin)
+// all records in period (admin)
+// edit one Draft record (admin)
+// approve whole period (admin)
+// own approved records (employee)
+
 
 declare(strict_types=1);
 
