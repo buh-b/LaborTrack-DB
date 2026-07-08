@@ -1,10 +1,11 @@
 <?php
 // =============================================================================
-// routes/auth.php — Login / logout / session check
+// routes/auth.php — Login / logout / session check / change password
 //
-// POST /backend/routes/auth.php?action=login    body: { username, password }
+// POST /backend/routes/auth.php?action=login           body: { username, password }
 // POST /backend/routes/auth.php?action=logout
 // GET  /backend/routes/auth.php?action=me
+// POST /backend/routes/auth.php?action=change_password body: { current_password, new_password }
 // =============================================================================
 
 declare(strict_types=1);
@@ -78,6 +79,34 @@ if ($method === 'GET' && $action === 'me') {
         'access_level' => currentAccessLevel(),
         'username'     => $_SESSION['username'] ?? null,
     ]);
+}
+
+// ── POST: change password ─────────────────────────────────────────────────────
+if ($method === 'POST' && $action === 'change_password') {
+    requireAuth();
+
+    $body            = bodyJson();
+    $currentPassword = str($body, 'current_password');
+    $newPassword     = str($body, 'new_password');
+
+    if ($currentPassword === '') json_err('current_password is required.');
+    if ($newPassword     === '') json_err('new_password is required.');
+    if (strlen($newPassword) < 6) json_err('New password must be at least 6 characters.');
+
+    $pdo  = getDB();
+    $stmt = $pdo->prepare('SELECT password_hash FROM accounts WHERE account_id = ? LIMIT 1');
+    $stmt->execute([currentAccountId()]);
+    $acc = $stmt->fetch();
+
+    if (!$acc || !password_verify($currentPassword, $acc['password_hash'])) {
+        json_err('Current password is incorrect.', 401);
+    }
+
+    $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
+    $pdo->prepare('UPDATE accounts SET password_hash = ? WHERE account_id = ?')
+        ->execute([$newHash, currentAccountId()]);
+
+    json_ok(['message' => 'Password changed successfully.']);
 }
 
 json_err('Not found.', 404);

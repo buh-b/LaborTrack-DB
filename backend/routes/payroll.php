@@ -459,4 +459,30 @@ if ($method === 'POST' && $action === 'approve') {
     json_ok(['message' => 'Payroll period approved and locked.', 'period_id' => $periodId]);
 }
 
+// ── POST: unapprove (revert Approved → Draft) ─────────────────────────────────
+if ($method === 'POST' && $action === 'unapprove') {
+    requireAdmin();
+
+    $periodId = intVal_($_GET, 'period_id');
+    if (!$periodId) json_err('period_id query param is required.');
+
+    $stmt = $pdo->prepare(
+        'SELECT * FROM payroll_periods WHERE period_id = ? LIMIT 1'
+    );
+    $stmt->execute([$periodId]);
+    $period = $stmt->fetch();
+
+    if (!$period) json_err('Payroll period not found.', 404);
+    if ($period['status'] !== 'Approved') json_err('Only Approved periods can be reverted to Draft.');
+
+    $pdo->prepare(
+        'UPDATE payroll_periods
+         SET    status = ?, approved_by = NULL, approved_at = NULL
+         WHERE  period_id = ?'
+    )->execute(['Draft', $periodId]);
+
+    json_ok(['message' => 'Payroll period reverted to Draft.', 'period_id' => $periodId]);
+}
+
+
 json_err('Not found.', 404);
