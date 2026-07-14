@@ -1,12 +1,5 @@
 <?php
-// =============================================================================
 // routes/auth.php — Login / logout / session check / change password
-//
-// POST /backend/routes/auth.php?action=login           body: { username, password }
-// POST /backend/routes/auth.php?action=logout
-// GET  /backend/routes/auth.php?action=me
-// POST /backend/routes/auth.php?action=change_password body: { current_password, new_password }
-// =============================================================================
 
 declare(strict_types=1);
 
