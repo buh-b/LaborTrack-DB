@@ -1,19 +1,4 @@
 <?php
-// =============================================================================
-// routes/time_logs.php — Clock-in / clock-out and time log management
-//
-// GET  /backend/routes/time_logs.php                  → list logs
-// POST /backend/routes/time_logs.php?action=clock_in
-// POST /backend/routes/time_logs.php?action=clock_out
-// POST /backend/routes/time_logs.php?action=status    → current clock-in status
-// PUT  /backend/routes/time_logs.php                  → admin edit
-//
-// Changes from v1:
-//   - clock_out now auto-computes overtime_hours (max(0, total_hours - 8))
-//   - PUT now allows editing: shift_category_id, status_id,
-//     overtime_hours, overtime_category_id, clock_in, clock_out
-// =============================================================================
-
 declare(strict_types=1);
 
 require_once __DIR__ . '/../config/db.php';
