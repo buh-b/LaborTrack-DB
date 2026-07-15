@@ -33,13 +33,32 @@ if ($method === 'GET') {
     }
     //all employee
     if (currentAccessLevel() === 'admin') {
-        $rows = $pdo->query(
-            'SELECT e.*, d.department_name, r.role_name
-             FROM   employees e
-             LEFT   JOIN departments d ON d.department_id = e.department_id
-             LEFT   JOIN roles       r ON r.role_id       = e.role_id
-             ORDER  BY e.full_name'
-        )->fetchAll();
+        $search = $_GET['search']        ?? '';
+        $deptId = $_GET['department_id'] ?? '';
+
+        $sql    = 'SELECT e.*, d.department_name, r.role_name
+                   FROM   employees e
+                   LEFT   JOIN departments d ON d.department_id = e.department_id
+                   LEFT   JOIN roles       r ON r.role_id       = e.role_id
+                   WHERE  1=1';
+        $params = [];
+
+        if ($search !== '') {
+            $sql     .= ' AND (e.full_name LIKE ? OR e.email LIKE ?)';
+            $params[] = "%{$search}%";
+            $params[] = "%{$search}%";
+        }
+
+        if ($deptId !== '') {
+            $sql     .= ' AND e.department_id = ?';
+            $params[] = (int)$deptId;
+        }
+
+        $sql .= ' ORDER BY e.full_name';
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
     } elseif (currentEmployeeId() === null) {
         json_ok([]);
     } else {

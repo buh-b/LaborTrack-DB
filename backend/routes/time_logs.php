@@ -64,6 +64,23 @@ if ($method === 'GET' && $action === '') {
             $where[]  = 'tl.employee_id = ?';
             $params[] = (int)$_GET['employee_id'];
         }
+        if (!empty($_GET['department_id'])) {
+            $where[]  = 'e.department_id = ?';
+            $params[] = (int)$_GET['department_id'];
+        }
+        if (!empty($_GET['search'])) {
+            $where[]  = 'e.full_name LIKE ?';
+            $params[] = '%' . $_GET['search'] . '%';
+        }
+        // Year/month filtering
+        if (!empty($_GET['year']) && !empty($_GET['month'])) {
+            $where[]  = 'YEAR(tl.clock_in) = ? AND MONTH(tl.clock_in) = ?';
+            $params[] = (int)$_GET['year'];
+            $params[] = (int)$_GET['month'];
+        } elseif (!empty($_GET['year'])) {
+            $where[]  = 'YEAR(tl.clock_in) = ?';
+            $params[] = (int)$_GET['year'];
+        }
         if (!empty($_GET['from'])) {
             $where[]  = 'DATE(tl.clock_in) >= ?';
             $params[] = $_GET['from'];
@@ -77,6 +94,15 @@ if ($method === 'GET' && $action === '') {
         if ($empId === null) json_err('No employee record linked to this account.', 403);
         $where[]  = 'tl.employee_id = ?';
         $params[] = $empId;
+        // Employee can filter by year/month too
+        if (!empty($_GET['year']) && !empty($_GET['month'])) {
+            $where[]  = 'YEAR(tl.clock_in) = ? AND MONTH(tl.clock_in) = ?';
+            $params[] = (int)$_GET['year'];
+            $params[] = (int)$_GET['month'];
+        } elseif (!empty($_GET['year'])) {
+            $where[]  = 'YEAR(tl.clock_in) = ?';
+            $params[] = (int)$_GET['year'];
+        }
     }
 
     $sql  = LOG_SELECT

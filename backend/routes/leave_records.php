@@ -18,9 +18,21 @@ if ($method === 'GET') {
     if (currentAccessLevel() !== 'admin') {
         $where[]  = 'lr.employee_id = ?';
         $params[] = currentEmployeeId();
+        // Employee can also filter by search (leave type)
+        if (!empty($_GET['search'])) {
+            $where[]  = 'lr.leave_type LIKE ?';
+            $params[] = '%' . $_GET['search'] . '%';
+        }
+        if (!empty($_GET['status'])) { $where[] = 'lr.leave_status = ?'; $params[] = $_GET['status']; }
     } else {
         if (!empty($_GET['employee_id'])) { $where[] = 'lr.employee_id = ?'; $params[] = (int)$_GET['employee_id']; }
         if (!empty($_GET['status']))      { $where[] = 'lr.leave_status = ?'; $params[] = $_GET['status']; }
+        // Admin search by employee name or leave type
+        if (!empty($_GET['search'])) {
+            $where[]  = '(e.full_name LIKE ? OR lr.leave_type LIKE ?)';
+            $params[] = '%' . $_GET['search'] . '%';
+            $params[] = '%' . $_GET['search'] . '%';
+        }
     }
 
     $sql = 'SELECT lr.*, e.full_name
