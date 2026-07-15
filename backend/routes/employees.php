@@ -1,13 +1,9 @@
 <?php
-// =============================================================================
-// routes/employees.php — Employee CRUD
-//
 // GET    /backend/routes/employees.php        → list all (auth required)
 // GET    /backend/routes/employees.php?id=X   → single employee
 // POST   /backend/routes/employees.php        → create (admin only)
 // PUT    /backend/routes/employees.php        → update (admin only)
 // DELETE /backend/routes/employees.php?id=X   → delete (admin only)
-// =============================================================================
 
 declare(strict_types=1);
 
@@ -18,7 +14,7 @@ header('Content-Type: application/json');
 
 $method = $_SERVER['REQUEST_METHOD'];
 
-// ── GET ───────────────────────────────────────────────────────────────────────
+// List all employees
 if ($method === 'GET') {
     requireAuth();
     $pdo = getDB();
@@ -66,7 +62,7 @@ if ($method === 'GET') {
     json_ok(array_map('castEmployee', $rows));
 }
 
-// ── POST: create ──────────────────────────────────────────────────────────────
+// POST: create 
 if ($method === 'POST') {
     requireAdmin();
 
@@ -97,7 +93,7 @@ if ($method === 'POST') {
     json_ok(['employee_id' => (int)$pdo->lastInsertId(), 'message' => 'Employee created.']);
 }
 
-// ── PUT: update ───────────────────────────────────────────────────────────────
+// PUT: update 
 if ($method === 'PUT') {
     requireAdmin();
 
@@ -130,7 +126,7 @@ if ($method === 'PUT') {
     json_ok(['message' => 'Employee updated.']);
 }
 
-// ── DELETE ────────────────────────────────────────────────────────────────────
+// DELETE 
 if ($method === 'DELETE') {
     requireAdmin();
 
