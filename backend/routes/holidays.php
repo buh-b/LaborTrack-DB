@@ -63,7 +63,15 @@ if ($method === 'POST') {
         }
         throw $e;
     }
-    json_ok(['holiday_id' => (int)$pdo->lastInsertId(), 'message' => 'Holiday created.']);
+    $holidayId = (int)$pdo->lastInsertId();
+
+    logAudit($pdo, 'holiday_create', 'holiday', $holidayId, [
+        'holiday_date' => $date,
+        'holiday_name' => $name,
+        'holiday_type' => $type,
+    ]);
+
+    json_ok(['holiday_id' => $holidayId, 'message' => 'Holiday created.']);
 }
 
 // PUT — update
@@ -90,8 +98,15 @@ if ($method === 'PUT') {
         json_err('holiday_type must be Regular or Special.');
     }
 
+    $pdo = getDB();
+    $existsStmt = $pdo->prepare('SELECT holiday_id FROM holidays WHERE holiday_id = ? LIMIT 1');
+    $existsStmt->execute([$id]);
+    if (!$existsStmt->fetch()) {
+        json_err('Holiday not found.', 404);
+    }
+
     try {
-        $stmt = getDB()->prepare(
+        $stmt = $pdo->prepare(
             'UPDATE holidays SET holiday_date = ?, holiday_name = ?, holiday_type = ? WHERE holiday_id = ?'
         );
         $stmt->execute([$date, $name, $type, $id]);
@@ -101,9 +116,13 @@ if ($method === 'PUT') {
         }
         throw $e;
     }
-    if ($stmt->rowCount() === 0) {
-        json_err('Holiday not found.', 404);
-    }
+
+    logAudit($pdo, 'holiday_update', 'holiday', $id, [
+        'holiday_date' => $date,
+        'holiday_name' => $name,
+        'holiday_type' => $type,
+    ]);
+
     json_ok(['message' => 'Holiday updated.']);
 }
 
@@ -114,11 +133,15 @@ if ($method === 'DELETE') {
     if (!$id) {
         json_err('id query param is required.');
     }
-    $stmt = getDB()->prepare('DELETE FROM holidays WHERE holiday_id = ?');
+    $pdo = getDB();
+    $stmt = $pdo->prepare('DELETE FROM holidays WHERE holiday_id = ?');
     $stmt->execute([$id]);
     if ($stmt->rowCount() === 0) {
         json_err('Holiday not found.', 404);
     }
+
+    logAudit($pdo, 'holiday_delete', 'holiday', $id, null);
+
     json_ok(['message' => 'Holiday deleted.']);
 }
 
