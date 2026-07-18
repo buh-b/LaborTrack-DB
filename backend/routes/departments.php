@@ -34,7 +34,6 @@ if ($method === 'GET') {
         'department_code'       => $r['department_code'],
         'supervisor_id'         => $r['supervisor_id'] !== null ? (int)$r['supervisor_id'] : null,
         'supervisor_name'       => trim((string)$r['supervisor_name']) !== '' ? $r['supervisor_name'] : null,
-        'labor_cost_allocation' => (float)($r['labor_cost_allocation'] ?? 0),
         'employee_count'        => (int)$r['employee_count'],
     ], $rows));
 }
@@ -49,12 +48,11 @@ if ($method === 'POST') {
 
     $pdo  = getDB();
     $stmt = $pdo->prepare(
-        'INSERT INTO departments (department_name, department_code, labor_cost_allocation, supervisor_id) VALUES (?, ?, ?, ?)'
+        'INSERT INTO departments (department_name, department_code, supervisor_id) VALUES (?, ?, ?)'
     );
     $stmt->execute([
         $name,
         strtoupper($code),
-        floatVal_($body, 'labor_cost_allocation'),
         intVal_($body, 'supervisor_id'),
     ]);
     json_ok(['department_id' => (int)$pdo->lastInsertId(), 'message' => 'Department created.']);
@@ -72,11 +70,10 @@ if ($method === 'PUT') {
     if (!$chk->fetch()) json_err('Department not found.', 404);
 
     $pdo->prepare(
-        'UPDATE departments SET department_name = ?, department_code = ?, labor_cost_allocation = ?, supervisor_id = ? WHERE department_id = ?'
+        'UPDATE departments SET department_name = ?, department_code = ?, supervisor_id = ? WHERE department_id = ?'
     )->execute([
         str($body, 'department_name'),
         strtoupper(str($body, 'department_code')),
-        floatVal_($body, 'labor_cost_allocation'),
         intVal_($body, 'supervisor_id'),
         $id,
     ]);
