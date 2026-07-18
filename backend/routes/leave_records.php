@@ -8,49 +8,135 @@ header('Content-Type: application/json');
 
 $method = $_SERVER['REQUEST_METHOD'];
 
-// list all forms admin/ employee self
+const LEAVE_SELECT =
+    'SELECT lr.*,
+            CONCAT(e.first_name, " ", e.last_name) AS full_name,
+            lt.leave_name AS leave_type,
+            ls.status_name AS leave_status
+     FROM   leave_records lr
+     LEFT   JOIN employees    e  ON e.employee_id    = lr.employee_id
+     LEFT   JOIN leave_types  lt ON lt.leave_type_id = lr.leave_type_id
+     LEFT   JOIN leave_status ls ON ls.leave_status_id = lr.leave_status_id';
+
+function resolveLeaveTypeId(PDO $pdo, array $body): ?int {
+    $id = intVal_($body, 'leave_type_id');
+    if ($id !== null) {
+        return $id;
+    }
+
+    $name = str($body, 'leave_type');
+    if ($name === '') {
+        return null;
+    }
+
+    $stmt = $pdo->prepare('SELECT leave_type_id FROM leave_types WHERE leave_name = ? LIMIT 1');
+    $stmt->execute([$name]);
+    $row = $stmt->fetch();
+
+    return $row ? (int)$row['leave_type_id'] : null;
+}
+
+function resolveLeaveStatusId(PDO $pdo, array $body, ?int $fallback = null): ?int {
+    $id = intVal_($body, 'leave_status_id');
+    if ($id !== null) {
+        return $id;
+    }
+
+    $name = str($body, 'leave_status');
+    if ($name === '') {
+        return $fallback;
+    }
+
+    $stmt = $pdo->prepare('SELECT leave_status_id FROM leave_status WHERE status_name = ? LIMIT 1');
+    $stmt->execute([$name]);
+    $row = $stmt->fetch();
+
+    return $row ? (int)$row['leave_status_id'] : $fallback;
+}
+
+function resolveLeaveStatusFilter(PDO $pdo, string $status): ?int {
+    $stmt = $pdo->prepare('SELECT leave_status_id FROM leave_status WHERE status_name = ? LIMIT 1');
+    $stmt->execute([$status]);
+    $row = $stmt->fetch();
+
+    return $row ? (int)$row['leave_status_id'] : null;
+}
+
+function computeLeaveHours(string $dateFrom, string $dateTo, ?float $provided = null): ?float {
+    if ($provided !== null) {
+        return $provided;
+    }
+
+    $from = new DateTime($dateFrom);
+    $to   = new DateTime($dateTo);
+    $days = (int)$from->diff($to)->days + 1;
+
+    return $days > 0 ? round($days * 8.0, 2) : 8.0;
+}
+
+// list all leave records
 if ($method === 'GET') {
     requireAuth();
     $pdo    = getDB();
     $where  = [];
     $params = [];
-
-    $level = currentAccessLevel();
+    $level  = currentAccessLevel();
 
     if (in_array($level, ['system_admin', 'payroll_admin'], true)) {
-        if (!empty($_GET['employee_id'])) { $where[] = 'lr.employee_id = ?'; $params[] = (int)$_GET['employee_id']; }
-        if (!empty($_GET['status']))      { $where[] = 'lr.leave_status = ?'; $params[] = $_GET['status']; }
-        // Admin-tier search by employee name or leave type
+        if (!empty($_GET['employee_id'])) {
+            $where[]  = 'lr.employee_id = ?';
+            $params[] = (int)$_GET['employee_id'];
+        }
+        if (!empty($_GET['status'])) {
+            $statusId = resolveLeaveStatusFilter($pdo, $_GET['status']);
+            if ($statusId !== null) {
+                $where[]  = 'lr.leave_status_id = ?';
+                $params[] = $statusId;
+            }
+        }
         if (!empty($_GET['search'])) {
-            $where[]  = '(e.full_name LIKE ? OR lr.leave_type LIKE ?)';
-            $params[] = '%' . $_GET['search'] . '%';
-            $params[] = '%' . $_GET['search'] . '%';
+            $where[]  = '(CONCAT(e.first_name, " ", e.last_name) LIKE ? OR lt.leave_name LIKE ?)';
+            $term     = '%' . $_GET['search'] . '%';
+            $params[] = $term;
+            $params[] = $term;
         }
     } elseif ($level === 'supervisor') {
         $deptId = currentDepartmentId();
-        if ($deptId === null) json_ok([]);
+        if ($deptId === null) {
+            json_ok([]);
+        }
         $where[]  = 'e.department_id = ?';
         $params[] = $deptId;
-        if (!empty($_GET['status'])) { $where[] = 'lr.leave_status = ?'; $params[] = $_GET['status']; }
+        if (!empty($_GET['status'])) {
+            $statusId = resolveLeaveStatusFilter($pdo, $_GET['status']);
+            if ($statusId !== null) {
+                $where[]  = 'lr.leave_status_id = ?';
+                $params[] = $statusId;
+            }
+        }
         if (!empty($_GET['search'])) {
-            $where[]  = '(e.full_name LIKE ? OR lr.leave_type LIKE ?)';
-            $params[] = '%' . $_GET['search'] . '%';
-            $params[] = '%' . $_GET['search'] . '%';
+            $where[]  = '(CONCAT(e.first_name, " ", e.last_name) LIKE ? OR lt.leave_name LIKE ?)';
+            $term     = '%' . $_GET['search'] . '%';
+            $params[] = $term;
+            $params[] = $term;
         }
     } else {
         $where[]  = 'lr.employee_id = ?';
         $params[] = currentEmployeeId();
-        // Employee can also filter by search (leave type)
         if (!empty($_GET['search'])) {
-            $where[]  = 'lr.leave_type LIKE ?';
+            $where[]  = 'lt.leave_name LIKE ?';
             $params[] = '%' . $_GET['search'] . '%';
         }
-        if (!empty($_GET['status'])) { $where[] = 'lr.leave_status = ?'; $params[] = $_GET['status']; }
+        if (!empty($_GET['status'])) {
+            $statusId = resolveLeaveStatusFilter($pdo, $_GET['status']);
+            if ($statusId !== null) {
+                $where[]  = 'lr.leave_status_id = ?';
+                $params[] = $statusId;
+            }
+        }
     }
 
-    $sql = 'SELECT lr.*, e.full_name
-            FROM   leave_records lr
-            LEFT   JOIN employees e ON e.employee_id = lr.employee_id'
+    $sql = LEAVE_SELECT
          . (count($where) ? ' WHERE ' . implode(' AND ', $where) : '')
          . ' ORDER BY lr.date_from DESC';
 
@@ -59,27 +145,48 @@ if ($method === 'GET') {
     json_ok(array_map('castLeave', $stmt->fetchAll()));
 }
 
-// POST: file a leave request 
+// POST: file a leave request
 if ($method === 'POST') {
     requireAuth();
     $body       = bodyJson();
     $employeeId = in_array(currentAccessLevel(), ['system_admin', 'payroll_admin'], true)
                   ? intVal_($body, 'employee_id', currentEmployeeId())
                   : currentEmployeeId();
-    $leaveType  = str($body, 'leave_type');
-    $dateFrom   = str($body, 'date_from');
-    $dateTo     = str($body, 'date_to');
+    $leaveTypeId = resolveLeaveTypeId($pdo = getDB(), $body);
+    $dateFrom    = str($body, 'date_from');
+    $dateTo      = str($body, 'date_to');
 
-    if ($leaveType === '') json_err('leave_type is required.');
-    if ($dateFrom  === '') json_err('date_from is required.');
-    if ($dateTo    === '') json_err('date_to is required.');
-    if ($dateTo < $dateFrom) json_err('date_to must be on or after date_from.');
+    if ($leaveTypeId === null) {
+        json_err('leave_type_id is required.');
+    }
+    if ($dateFrom === '') {
+        json_err('date_from is required.');
+    }
+    if ($dateTo === '') {
+        json_err('date_to is required.');
+    }
+    if ($dateTo < $dateFrom) {
+        json_err('date_to must be on or after date_from.');
+    }
 
-    $pdo = getDB();
+    $leaveHours = computeLeaveHours(
+        $dateFrom,
+        $dateTo,
+        array_key_exists('leave_hours', $body) ? floatVal_($body, 'leave_hours') : null
+    );
+
     $pdo->prepare(
-        'INSERT INTO leave_records (employee_id, leave_type, date_from, date_to, leave_status, remarks)
-         VALUES (?, ?, ?, ?, ?, ?)'
-    )->execute([$employeeId, $leaveType, $dateFrom, $dateTo, 'Pending', str($body, 'remarks') ?: null]);
+        'INSERT INTO leave_records
+            (employee_id, leave_type_id, leave_status_id, date_from, date_to, leave_hours, remarks)
+         VALUES (?, ?, 1, ?, ?, ?, ?)'
+    )->execute([
+        $employeeId,
+        $leaveTypeId,
+        $dateFrom,
+        $dateTo,
+        $leaveHours,
+        str($body, 'remarks') ?: null,
+    ]);
 
     json_ok(['leave_id' => (int)$pdo->lastInsertId(), 'message' => 'Leave request filed.']);
 }
@@ -89,7 +196,9 @@ if ($method === 'PUT') {
     requireAuth();
     $body    = bodyJson();
     $leaveId = intVal_($body, 'leave_id');
-    if (!$leaveId) json_err('leave_id is required.');
+    if (!$leaveId) {
+        json_err('leave_id is required.');
+    }
 
     $pdo  = getDB();
     $stmt = $pdo->prepare(
@@ -100,50 +209,112 @@ if ($method === 'PUT') {
     );
     $stmt->execute([$leaveId]);
     $leave = $stmt->fetch();
-    if (!$leave) json_err('Leave record not found.', 404);
+    if (!$leave) {
+        json_err('Leave record not found.', 404);
+    }
 
     $level = currentAccessLevel();
 
     if (in_array($level, ['system_admin', 'payroll_admin', 'supervisor'], true)) {
-        // Supervisor is limited to their own department and can never approve/reject their own request
         if ($level === 'supervisor') {
-            if ((int)$leave['department_id'] !== currentDepartmentId()) json_err('Forbidden.', 403);
+            if ((int)$leave['department_id'] !== currentDepartmentId()) {
+                json_err('Forbidden.', 403);
+            }
             if ((int)$leave['employee_id'] === currentEmployeeId()) {
                 json_err('You cannot approve or reject your own leave request.');
             }
         }
-        $newStatus = str($body, 'leave_status', $leave['leave_status']);
-        if (!in_array($newStatus, ['Pending', 'Approved', 'Rejected'], true)) {
-            json_err('leave_status must be Pending, Approved, or Rejected.');
+
+        $newStatusId = resolveLeaveStatusId(
+            $pdo,
+            $body,
+            $leave['leave_status_id'] !== null ? (int)$leave['leave_status_id'] : 1
+        );
+
+        $leaveTypeId = resolveLeaveTypeId($pdo, $body)
+            ?? ($leave['leave_type_id'] !== null ? (int)$leave['leave_type_id'] : null);
+        if ($leaveTypeId === null) {
+            json_err('leave_type_id is required.');
         }
+
+        $dateFrom = str($body, 'date_from', $leave['date_from']);
+        $dateTo   = str($body, 'date_to', $leave['date_to']);
+        if ($dateTo < $dateFrom) {
+            json_err('date_to must be on or after date_from.');
+        }
+
+        $approvedBy = null;
+        if ($newStatusId === 2) {
+            $approvedBy = currentAccountId();
+        }
+
+        $leaveHours = computeLeaveHours(
+            $dateFrom,
+            $dateTo,
+            array_key_exists('leave_hours', $body)
+                ? floatVal_($body, 'leave_hours')
+                : ($leave['leave_hours'] !== null ? (float)$leave['leave_hours'] : null)
+        );
+
         $pdo->prepare(
-            'UPDATE leave_records SET leave_type = ?, date_from = ?, date_to = ?, leave_status = ?, remarks = ? WHERE leave_id = ?'
+            'UPDATE leave_records
+             SET leave_type_id = ?, leave_status_id = ?, date_from = ?, date_to = ?,
+                 leave_hours = ?, remarks = ?, approved_by_account_id = ?
+             WHERE leave_id = ?'
         )->execute([
-            str($body, 'leave_type', $leave['leave_type']),
-            str($body, 'date_from',  $leave['date_from']),
-            str($body, 'date_to',    $leave['date_to']),
-            $newStatus,
+            $leaveTypeId,
+            $newStatusId,
+            $dateFrom,
+            $dateTo,
+            $leaveHours,
             str($body, 'remarks', $leave['remarks'] ?? ''),
+            $approvedBy,
             $leaveId,
         ]);
+
         json_ok(['message' => 'Leave record updated.']);
     }
 
-    if ((int)$leave['employee_id'] !== currentEmployeeId()) json_err('Forbidden.', 403);
-    if ($leave['leave_status'] !== 'Pending') json_err('Only pending requests can be edited.');
+    if ((int)$leave['employee_id'] !== currentEmployeeId()) {
+        json_err('Forbidden.', 403);
+    }
+    if ((int)$leave['leave_status_id'] !== 1) {
+        json_err('Only pending requests can be edited.');
+    }
+
+    $leaveTypeId = resolveLeaveTypeId($pdo, $body)
+        ?? ($leave['leave_type_id'] !== null ? (int)$leave['leave_type_id'] : null);
+    if ($leaveTypeId === null) {
+        json_err('leave_type_id is required.');
+    }
 
     $dateFrom = str($body, 'date_from', $leave['date_from']);
-    $dateTo   = str($body, 'date_to',   $leave['date_to']);
-    if ($dateTo < $dateFrom) json_err('date_to must be on or after date_from.');
-//employee
+    $dateTo   = str($body, 'date_to', $leave['date_to']);
+    if ($dateTo < $dateFrom) {
+        json_err('date_to must be on or after date_from.');
+    }
+
+    $leaveHours = computeLeaveHours(
+        $dateFrom,
+        $dateTo,
+        array_key_exists('leave_hours', $body)
+            ? floatVal_($body, 'leave_hours')
+            : ($leave['leave_hours'] !== null ? (float)$leave['leave_hours'] : null)
+    );
+
     $pdo->prepare(
-        'UPDATE leave_records SET leave_type = ?, date_from = ?, date_to = ?, remarks = ? WHERE leave_id = ?'
+        'UPDATE leave_records
+         SET leave_type_id = ?, date_from = ?, date_to = ?, leave_hours = ?, remarks = ?
+         WHERE leave_id = ?'
     )->execute([
-        str($body, 'leave_type', $leave['leave_type']),
-        $dateFrom, $dateTo,
+        $leaveTypeId,
+        $dateFrom,
+        $dateTo,
+        $leaveHours,
         str($body, 'remarks', $leave['remarks'] ?? ''),
         $leaveId,
     ]);
+
     json_ok(['message' => 'Leave request updated.']);
 }
 
@@ -151,17 +322,25 @@ if ($method === 'PUT') {
 if ($method === 'DELETE') {
     requireAuth();
     $id = intVal_($_GET, 'id');
-    if (!$id) json_err('id query param is required.');
+    if (!$id) {
+        json_err('id query param is required.');
+    }
 
     $pdo  = getDB();
     $stmt = $pdo->prepare('SELECT * FROM leave_records WHERE leave_id = ? LIMIT 1');
     $stmt->execute([$id]);
     $leave = $stmt->fetch();
-    if (!$leave) json_err('Leave record not found.', 404);
+    if (!$leave) {
+        json_err('Leave record not found.', 404);
+    }
 
     if (!in_array(currentAccessLevel(), ['system_admin', 'payroll_admin'], true)) {
-        if ((int)$leave['employee_id'] !== currentEmployeeId()) json_err('Forbidden.', 403);
-        if ($leave['leave_status'] !== 'Pending') json_err('Only pending requests can be cancelled.');
+        if ((int)$leave['employee_id'] !== currentEmployeeId()) {
+            json_err('Forbidden.', 403);
+        }
+        if ((int)$leave['leave_status_id'] !== 1) {
+            json_err('Only pending requests can be cancelled.');
+        }
     }
 
     $pdo->prepare('DELETE FROM leave_records WHERE leave_id = ?')->execute([$id]);
@@ -172,13 +351,19 @@ json_err('Method not allowed.', 405);
 
 function castLeave(array $r): array {
     return [
-        'leave_id'     => (int)$r['leave_id'],
-        'employee_id'  => (int)$r['employee_id'],
-        'leave_type'   => $r['leave_type'],
-        'date_from'    => $r['date_from'],
-        'date_to'      => $r['date_to'],
-        'leave_status' => $r['leave_status'],
-        'remarks'      => $r['remarks'],
-        'full_name'    => $r['full_name'] ?? null,
+        'leave_id'               => (int)$r['leave_id'],
+        'employee_id'            => (int)$r['employee_id'],
+        'leave_type_id'          => $r['leave_type_id']   !== null ? (int)$r['leave_type_id']   : null,
+        'leave_status_id'        => $r['leave_status_id'] !== null ? (int)$r['leave_status_id'] : null,
+        'approved_by_account_id' => $r['approved_by_account_id'] !== null ? (int)$r['approved_by_account_id'] : null,
+        'leave_type'             => $r['leave_type']   ?? null,
+        'leave_status'           => $r['leave_status'] ?? null,
+        'date_from'              => $r['date_from'],
+        'date_to'                => $r['date_to'],
+        'leave_hours'            => $r['leave_hours'] !== null ? (float)$r['leave_hours'] : null,
+        'remarks'                => $r['remarks'],
+        'created_at'             => $r['created_at'] ?? null,
+        'updated_at'             => $r['updated_at'] ?? null,
+        'full_name'              => trim($r['full_name'] ?? '') ?: null,
     ];
 }

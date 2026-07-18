@@ -12,54 +12,78 @@ $pdo    = getDB();
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
 
-const OVERTIME_THRESHOLD_HOURS = 8;
-const LATE_HOUR                = 9;
-const LATE_MINUTE              = 15;
+const LOG_SELECT =
+    'SELECT tl.log_id, tl.employee_id,
+            CONCAT(e.first_name, " ", e.last_name) AS full_name,
+            tl.status_id, ast.status_label,
+            tl.work_date, tl.clock_in, tl.clock_out,
+            tl.break_minutes, tl.total_hours, tl.hours_valid,
+            tl.created_at, tl.updated_at
+     FROM      time_logs tl
+     JOIN      employees         e   ON e.employee_id = tl.employee_id
+     LEFT JOIN attendance_status ast ON ast.status_id = tl.status_id';
 
-function isLate(string $clockInDatetime): bool {
-    $dt = new DateTime($clockInDatetime);
-    $h  = (int)$dt->format('H');
-    $m  = (int)$dt->format('i');
-    return ($h > LATE_HOUR) || ($h === LATE_HOUR && $m > LATE_MINUTE);
+function fetchEmployeeSchedule(PDO $pdo, int $employeeId): ?array {
+    $stmt = $pdo->prepare(
+        'SELECT ws.*
+         FROM   employees e
+         LEFT   JOIN work_schedules ws ON ws.schedule_id = e.schedule_id
+         WHERE  e.employee_id = ?'
+    );
+    $stmt->execute([$employeeId]);
+    $row = $stmt->fetch();
+
+    return ($row && !empty($row['schedule_id'])) ? $row : null;
+}
+
+function computeTotalHours(string $clockIn, string $clockOut, int $breakMinutes = 0): float {
+    $ci  = new DateTime($clockIn);
+    $co  = new DateTime($clockOut);
+    $raw = ($co->getTimestamp() - $ci->getTimestamp()) / 3600;
+
+    return round(max(0.0, $raw - ($breakMinutes / 60)), 2);
+}
+
+function isLateForSchedule(string $clockInDatetime, ?array $schedule): bool {
+    if (!$schedule || empty($schedule['start_time'])) {
+        $dt = new DateTime($clockInDatetime);
+        $h  = (int)$dt->format('H');
+        $m  = (int)$dt->format('i');
+
+        return ($h > 9) || ($h === 9 && $m > 15);
+    }
+
+    $workDate  = (new DateTime($clockInDatetime))->format('Y-m-d');
+    $deadline  = new DateTime($workDate . ' ' . $schedule['start_time']);
+    $lateAfter = (int)($schedule['late_after_minutes'] ?? 15);
+    $deadline->modify('+' . $lateAfter . ' minutes');
+
+    return new DateTime($clockInDatetime) > $deadline;
 }
 
 function castLog(array $r): array {
     return [
-        'log_id'               => (int)$r['log_id'],
-        'employee_id'          => (int)$r['employee_id'],
-        'full_name'            => $r['full_name'],
-        'shift_category_id'    => $r['shift_category_id']    !== null ? (int)$r['shift_category_id']    : null,
-        'category_name'        => $r['category_name']        ?? null,
-        'overtime_category_id' => $r['overtime_category_id'] !== null ? (int)$r['overtime_category_id'] : null,
-        'overtime_category_name' => $r['overtime_category_name'] ?? null,
-        'status_id'            => $r['status_id']            !== null ? (int)$r['status_id']            : null,
-        'status_label'         => $r['status_label']         ?? null,
-        'clock_in'             => $r['clock_in'],
-        'clock_out'            => $r['clock_out'],
-        'total_hours'          => $r['total_hours']          !== null ? (float)$r['total_hours']         : null,
-        'overtime_hours'       => $r['overtime_hours']       !== null ? (float)$r['overtime_hours']      : null,
+        'log_id'        => (int)$r['log_id'],
+        'employee_id'   => (int)$r['employee_id'],
+        'full_name'     => trim($r['full_name'] ?? '') ?: null,
+        'status_id'     => $r['status_id']     !== null ? (int)$r['status_id']     : null,
+        'status_label'  => $r['status_label']  ?? null,
+        'work_date'     => $r['work_date']     ?? null,
+        'clock_in'      => $r['clock_in'],
+        'clock_out'     => $r['clock_out'],
+        'break_minutes' => $r['break_minutes'] !== null ? (int)$r['break_minutes'] : 0,
+        'total_hours'   => $r['total_hours']   !== null ? (float)$r['total_hours']   : null,
+        'hours_valid'   => (bool)($r['hours_valid'] ?? true),
+        'created_at'    => $r['created_at'] ?? null,
+        'updated_at'    => $r['updated_at'] ?? null,
     ];
 }
 
-const LOG_SELECT =
-    'SELECT tl.log_id, tl.employee_id, e.full_name,
-            tl.shift_category_id,    sc.category_name,
-            tl.overtime_category_id, oc.category_name  AS overtime_category_name,
-            tl.status_id,            ast.status_label,
-            tl.clock_in, tl.clock_out, tl.total_hours, tl.overtime_hours
-     FROM      time_logs tl
-     JOIN      employees          e   ON e.employee_id           = tl.employee_id
-     LEFT JOIN shift_categories   sc  ON sc.shift_category_id    = tl.shift_category_id
-     LEFT JOIN overtime_categories oc ON oc.overtime_category_id = tl.overtime_category_id
-     LEFT JOIN attendance_status  ast ON ast.status_id           = tl.status_id';
-
 // list all logs
 if ($method === 'GET' && $action === '') {
-    // Optional filters (admin only for employee_id / date range)
     $where  = [];
     $params = [];
-
-    $level = currentAccessLevel();
+    $level  = currentAccessLevel();
 
     if (in_array($level, ['system_admin', 'payroll_admin'], true)) {
         if (!empty($_GET['employee_id'])) {
@@ -71,29 +95,30 @@ if ($method === 'GET' && $action === '') {
             $params[] = (int)$_GET['department_id'];
         }
         if (!empty($_GET['search'])) {
-            $where[]  = 'e.full_name LIKE ?';
+            $where[]  = 'CONCAT(e.first_name, " ", e.last_name) LIKE ?';
             $params[] = '%' . $_GET['search'] . '%';
         }
-        // Year/month filtering
         if (!empty($_GET['year']) && !empty($_GET['month'])) {
-            $where[]  = 'YEAR(tl.clock_in) = ? AND MONTH(tl.clock_in) = ?';
+            $where[]  = 'YEAR(tl.work_date) = ? AND MONTH(tl.work_date) = ?';
             $params[] = (int)$_GET['year'];
             $params[] = (int)$_GET['month'];
         } elseif (!empty($_GET['year'])) {
-            $where[]  = 'YEAR(tl.clock_in) = ?';
+            $where[]  = 'YEAR(tl.work_date) = ?';
             $params[] = (int)$_GET['year'];
         }
         if (!empty($_GET['from'])) {
-            $where[]  = 'DATE(tl.clock_in) >= ?';
+            $where[]  = 'tl.work_date >= ?';
             $params[] = $_GET['from'];
         }
         if (!empty($_GET['to'])) {
-            $where[]  = 'DATE(tl.clock_in) <= ?';
+            $where[]  = 'tl.work_date <= ?';
             $params[] = $_GET['to'];
         }
     } elseif ($level === 'supervisor') {
         $deptId = currentDepartmentId();
-        if ($deptId === null) json_ok([]);
+        if ($deptId === null) {
+            json_ok([]);
+        }
         $where[]  = 'e.department_id = ?';
         $params[] = $deptId;
         if (!empty($_GET['employee_id'])) {
@@ -101,57 +126,60 @@ if ($method === 'GET' && $action === '') {
             $params[] = (int)$_GET['employee_id'];
         }
         if (!empty($_GET['search'])) {
-            $where[]  = 'e.full_name LIKE ?';
+            $where[]  = 'CONCAT(e.first_name, " ", e.last_name) LIKE ?';
             $params[] = '%' . $_GET['search'] . '%';
         }
         if (!empty($_GET['year']) && !empty($_GET['month'])) {
-            $where[]  = 'YEAR(tl.clock_in) = ? AND MONTH(tl.clock_in) = ?';
+            $where[]  = 'YEAR(tl.work_date) = ? AND MONTH(tl.work_date) = ?';
             $params[] = (int)$_GET['year'];
             $params[] = (int)$_GET['month'];
         } elseif (!empty($_GET['year'])) {
-            $where[]  = 'YEAR(tl.clock_in) = ?';
+            $where[]  = 'YEAR(tl.work_date) = ?';
             $params[] = (int)$_GET['year'];
         }
         if (!empty($_GET['from'])) {
-            $where[]  = 'DATE(tl.clock_in) >= ?';
+            $where[]  = 'tl.work_date >= ?';
             $params[] = $_GET['from'];
         }
         if (!empty($_GET['to'])) {
-            $where[]  = 'DATE(tl.clock_in) <= ?';
+            $where[]  = 'tl.work_date <= ?';
             $params[] = $_GET['to'];
         }
     } else {
         $empId = currentEmployeeId();
-        if ($empId === null) json_err('No employee record linked to this account.', 403);
+        if ($empId === null) {
+            json_err('No employee record linked to this account.', 403);
+        }
         $where[]  = 'tl.employee_id = ?';
         $params[] = $empId;
-        // Employee can filter by year/month too
         if (!empty($_GET['year']) && !empty($_GET['month'])) {
-            $where[]  = 'YEAR(tl.clock_in) = ? AND MONTH(tl.clock_in) = ?';
+            $where[]  = 'YEAR(tl.work_date) = ? AND MONTH(tl.work_date) = ?';
             $params[] = (int)$_GET['year'];
             $params[] = (int)$_GET['month'];
         } elseif (!empty($_GET['year'])) {
-            $where[]  = 'YEAR(tl.clock_in) = ?';
+            $where[]  = 'YEAR(tl.work_date) = ?';
             $params[] = (int)$_GET['year'];
         }
     }
 
     $sql  = LOG_SELECT
           . (count($where) ? ' WHERE ' . implode(' AND ', $where) : '')
-          . ' ORDER BY tl.clock_in DESC';
+          . ' ORDER BY tl.work_date DESC, tl.clock_in DESC';
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     json_ok(array_map('castLog', $stmt->fetchAll()));
 }
 
-// status if employee is clock in rn
+// status if employee is clocked in right now
 if ($method === 'GET' && $action === 'status') {
     $empId = currentEmployeeId();
-    if ($empId === null) json_err('No employee record linked to this account.', 403);
+    if ($empId === null) {
+        json_err('No employee record linked to this account.', 403);
+    }
 
     $today = (new DateTime())->format('Y-m-d');
     $stmt  = $pdo->prepare(
-        LOG_SELECT . ' WHERE tl.employee_id = ? AND DATE(tl.clock_in) = ? AND tl.clock_out IS NULL LIMIT 1'
+        LOG_SELECT . ' WHERE tl.employee_id = ? AND tl.work_date = ? AND tl.clock_out IS NULL LIMIT 1'
     );
     $stmt->execute([$empId, $today]);
     $log = $stmt->fetch();
@@ -165,26 +193,29 @@ if ($method === 'GET' && $action === 'status') {
 // POST: clock in
 if ($method === 'POST' && $action === 'clock_in') {
     $empId = currentEmployeeId();
-    if ($empId === null) json_err('No employee record linked to this account.', 403);
-
-    $body            = bodyJson();
-    $shiftCategoryId = intVal_($body, 'shift_category_id', 1);
+    if ($empId === null) {
+        json_err('No employee record linked to this account.', 403);
+    }
 
     $today = (new DateTime())->format('Y-m-d');
     $check = $pdo->prepare(
         'SELECT log_id FROM time_logs
-         WHERE  employee_id = ? AND DATE(clock_in) = ? LIMIT 1'
+         WHERE employee_id = ? AND work_date = ? LIMIT 1'
     );
     $check->execute([$empId, $today]);
-    if ($check->fetch()) json_err('You have already clocked in today. Only one clock-in is allowed per day.');
+    if ($check->fetch()) {
+        json_err('You have already clocked in today. Only one clock-in is allowed per day.');
+    }
 
-    $now      = (new DateTime())->format('Y-m-d H:i:s');
-    $statusId = isLate($now) ? 2 : 1;
+    $schedule     = fetchEmployeeSchedule($pdo, $empId);
+    $breakMinutes = $schedule ? (int)($schedule['break_minutes'] ?? 0) : 0;
+    $now          = (new DateTime())->format('Y-m-d H:i:s');
+    $statusId     = isLateForSchedule($now, $schedule) ? 2 : 1;
 
     $pdo->prepare(
-        'INSERT INTO time_logs (employee_id, shift_category_id, status_id, clock_in)
-         VALUES (?, ?, ?, ?)'
-    )->execute([$empId, $shiftCategoryId, $statusId, $now]);
+        'INSERT INTO time_logs (employee_id, status_id, work_date, clock_in, break_minutes, hours_valid)
+         VALUES (?, ?, ?, ?, ?, 1)'
+    )->execute([$empId, $statusId, $today, $now, $breakMinutes]);
 
     $logId = (int)$pdo->lastInsertId();
     $sel   = $pdo->prepare(LOG_SELECT . ' WHERE tl.log_id = ?');
@@ -192,130 +223,126 @@ if ($method === 'POST' && $action === 'clock_in') {
     json_ok(castLog($sel->fetch()), 201);
 }
 
-// POST: clock out 
+// POST: clock out
 if ($method === 'POST' && $action === 'clock_out') {
     $empId = currentEmployeeId();
-    if ($empId === null) json_err('No employee record linked to this account.', 403);
+    if ($empId === null) {
+        json_err('No employee record linked to this account.', 403);
+    }
 
     $today = (new DateTime())->format('Y-m-d');
     $sel   = $pdo->prepare(
-        'SELECT log_id, clock_in
+        'SELECT log_id, clock_in, break_minutes
          FROM   time_logs
-         WHERE  employee_id = ? AND DATE(clock_in) = ? AND clock_out IS NULL LIMIT 1'
+         WHERE  employee_id = ? AND work_date = ? AND clock_out IS NULL
+         LIMIT  1'
     );
     $sel->execute([$empId, $today]);
     $log = $sel->fetch();
-    if (!$log) json_err('No open clock-in found for today.');
+    if (!$log) {
+        json_err('No open clock-in found for today.');
+    }
 
-    $clockOut   = new DateTime();
-    $clockIn    = new DateTime($log['clock_in']);
-    $totalHours = round(
-        ($clockOut->getTimestamp() - $clockIn->getTimestamp()) / 3600,
-        2
-    );
-
-    // Auto-compute overtime: anything beyond 8 hours in this shift
-    $overtimeHours = round(max(0.0, $totalHours - OVERTIME_THRESHOLD_HOURS), 2);
+    $clockOut     = (new DateTime())->format('Y-m-d H:i:s');
+    $breakMinutes = (int)($log['break_minutes'] ?? 0);
+    $totalHours   = computeTotalHours($log['clock_in'], $clockOut, $breakMinutes);
 
     $pdo->prepare(
         'UPDATE time_logs
-         SET    clock_out = ?, total_hours = ?, overtime_hours = ?
-         WHERE  log_id = ?'
-    )->execute([
-        $clockOut->format('Y-m-d H:i:s'),
-        $totalHours,
-        $overtimeHours > 0 ? $overtimeHours : null,   // NULL if no overtime
-        (int)$log['log_id'],
-    ]);
+         SET clock_out = ?, total_hours = ?
+         WHERE log_id = ?'
+    )->execute([$clockOut, $totalHours, (int)$log['log_id']]);
 
     $sel2 = $pdo->prepare(LOG_SELECT . ' WHERE tl.log_id = ?');
     $sel2->execute([(int)$log['log_id']]);
     json_ok(castLog($sel2->fetch()));
 }
 
-//  PUT: admin edit 
+// PUT: admin edit
 if ($method === 'PUT') {
     requirePayrollAdmin();
 
     $body  = bodyJson();
     $logId = intVal_($body, 'log_id');
-    if (!$logId) json_err('log_id is required.');
+    if (!$logId) {
+        json_err('log_id is required.');
+    }
 
-    // Fetch existing log first
     $existing = $pdo->prepare('SELECT * FROM time_logs WHERE log_id = ? LIMIT 1');
     $existing->execute([$logId]);
     $log = $existing->fetch();
-    if (!$log) json_err('Time log not found.', 404);
+    if (!$log) {
+        json_err('Time log not found.', 404);
+    }
 
     $fields = [];
     $params = [];
 
-    // shift_category_id
-    if (array_key_exists('shift_category_id', $body)) {
-        $fields[] = 'shift_category_id = ?';
-        $params[] = intVal_($body, 'shift_category_id');
-    }
-
-    // status_id
     if (array_key_exists('status_id', $body)) {
         $fields[] = 'status_id = ?';
         $params[] = intVal_($body, 'status_id');
     }
 
-    // overtime_category_id (can be set to null to unassign)
-    if (array_key_exists('overtime_category_id', $body)) {
-        $fields[] = 'overtime_category_id = ?';
-        $params[] = intVal_($body, 'overtime_category_id');
+    if (array_key_exists('work_date', $body)) {
+        $workDate = str($body, 'work_date');
+        if ($workDate === '') {
+            json_err('work_date cannot be empty.');
+        }
+        $fields[] = 'work_date = ?';
+        $params[] = $workDate;
     }
 
-    // overtime_hours (manual correction)
-    if (array_key_exists('overtime_hours', $body)) {
-        $oh = floatVal_($body, 'overtime_hours', 0.0);
-        if ($oh < 0) json_err('overtime_hours cannot be negative.');
-        $fields[] = 'overtime_hours = ?';
-        $params[] = $oh > 0 ? $oh : null;
+    if (array_key_exists('break_minutes', $body)) {
+        $breakMinutes = intVal_($body, 'break_minutes', 0);
+        if ($breakMinutes < 0) {
+            json_err('break_minutes cannot be negative.');
+        }
+        $fields[] = 'break_minutes = ?';
+        $params[] = $breakMinutes;
     }
 
-    // clock_in / clock_out correction — recompute total_hours and overtime_hours
-    $newClockIn  = array_key_exists('clock_in',  $body) ? str($body, 'clock_in')  : null;
+    if (array_key_exists('hours_valid', $body)) {
+        $fields[] = 'hours_valid = ?';
+        $params[] = (int)(bool)$body['hours_valid'];
+    }
+
+    $newClockIn  = array_key_exists('clock_in', $body) ? str($body, 'clock_in') : null;
     $newClockOut = array_key_exists('clock_out', $body) ? str($body, 'clock_out') : null;
 
     if ($newClockIn !== null || $newClockOut !== null) {
-        $ciStr = $newClockIn  ?? $log['clock_in'];
+        $ciStr = $newClockIn ?? $log['clock_in'];
         $coStr = $newClockOut ?? $log['clock_out'];
 
-        if ($ciStr === '') json_err('clock_in cannot be empty.');
+        if ($ciStr === '') {
+            json_err('clock_in cannot be empty.');
+        }
 
         $fields[] = 'clock_in = ?';
         $params[] = $ciStr;
 
-        if ($coStr !== null && $coStr !== '') {
-            $ci         = new DateTime($ciStr);
-            $co         = new DateTime($coStr);
-            $totalHours = round(($co->getTimestamp() - $ci->getTimestamp()) / 3600, 2);
-            if ($totalHours < 0) json_err('clock_out must be after clock_in.');
+        $breakMinutes = array_key_exists('break_minutes', $body)
+            ? (int)intVal_($body, 'break_minutes', 0)
+            : (int)($log['break_minutes'] ?? 0);
 
-            $autoOT = round(max(0.0, $totalHours - OVERTIME_THRESHOLD_HOURS), 2);
+        if ($coStr !== null && $coStr !== '') {
+            $totalHours = computeTotalHours($ciStr, $coStr, $breakMinutes);
+            if ($totalHours <= 0 && (new DateTime($coStr)) <= (new DateTime($ciStr))) {
+                json_err('clock_out must be after clock_in.');
+            }
 
             $fields[] = 'clock_out = ?';
             $params[] = $coStr;
             $fields[] = 'total_hours = ?';
             $params[] = $totalHours;
-
-            // Only overwrite overtime_hours if admin didn't explicitly set it in this request
-            if (!array_key_exists('overtime_hours', $body)) {
-                $fields[] = 'overtime_hours = ?';
-                $params[] = $autoOT > 0 ? $autoOT : null;
-            }
         } else {
-            // clock_out cleared (re-opened)
             $fields[] = 'clock_out = NULL';
             $fields[] = 'total_hours = NULL';
-            $fields[] = 'overtime_hours = NULL';
         }
     }
 
-    if (empty($fields)) json_err('Nothing to update.');
+    if (empty($fields)) {
+        json_err('Nothing to update.');
+    }
 
     $params[] = $logId;
     $pdo->prepare(

@@ -15,9 +15,8 @@ if ($method === 'GET') {
         'SELECT * FROM employment_types ORDER BY type_name'
     )->fetchAll();
     json_ok(array_map(fn($r) => [
-        'employment_type_id'            => (int)$r['employment_type_id'],
-        'type_name'                     => $r['type_name'],
-        'requires_statutory_deductions' => (bool)$r['requires_statutory_deductions'],
+        'employment_type_id' => (int)$r['employment_type_id'],
+        'type_name'          => $r['type_name'],
     ], $rows));
 }
 
@@ -26,14 +25,13 @@ if ($method === 'POST') {
     requireSystemAdmin();
     $body = bodyJson();
     $name = str($body, 'type_name');
-    if ($name === '') json_err('type_name is required.');
+    if ($name === '') {
+        json_err('type_name is required.');
+    }
     $pdo = getDB();
     $pdo->prepare(
-        'INSERT INTO employment_types (type_name, requires_statutory_deductions) VALUES (?, ?)'
-    )->execute([
-        $name,
-        isset($body['requires_statutory_deductions']) ? (int)(bool)$body['requires_statutory_deductions'] : 1,
-    ]);
+        'INSERT INTO employment_types (type_name) VALUES (?)'
+    )->execute([$name]);
     json_ok(['employment_type_id' => (int)$pdo->lastInsertId(), 'message' => 'Employment type created.']);
 }
 
@@ -43,17 +41,19 @@ if ($method === 'PUT') {
     $body = bodyJson();
     $id   = intVal_($body, 'employment_type_id');
     $name = str($body, 'type_name');
-    if (!$id)       json_err('employment_type_id is required.');
-    if ($name === '') json_err('type_name is required.');
+    if (!$id) {
+        json_err('employment_type_id is required.');
+    }
+    if ($name === '') {
+        json_err('type_name is required.');
+    }
     $stmt = getDB()->prepare(
-        'UPDATE employment_types SET type_name = ?, requires_statutory_deductions = ? WHERE employment_type_id = ?'
+        'UPDATE employment_types SET type_name = ? WHERE employment_type_id = ?'
     );
-    $stmt->execute([
-        $name,
-        isset($body['requires_statutory_deductions']) ? (int)(bool)$body['requires_statutory_deductions'] : 1,
-        $id,
-    ]);
-    if ($stmt->rowCount() === 0) json_err('Employment type not found.', 404);
+    $stmt->execute([$name, $id]);
+    if ($stmt->rowCount() === 0) {
+        json_err('Employment type not found.', 404);
+    }
     json_ok(['message' => 'Employment type updated.']);
 }
 
@@ -61,11 +61,15 @@ if ($method === 'PUT') {
 if ($method === 'DELETE') {
     requireSystemAdmin();
     $id = intVal_($_GET, 'id');
-    if (!$id) json_err('id query param is required.');
+    if (!$id) {
+        json_err('id query param is required.');
+    }
     $pdo  = getDB();
     $stmt = $pdo->prepare('DELETE FROM employment_types WHERE employment_type_id = ?');
     $stmt->execute([$id]);
-    if ($stmt->rowCount() === 0) json_err('Employment type not found.', 404);
+    if ($stmt->rowCount() === 0) {
+        json_err('Employment type not found.', 404);
+    }
     json_ok(['message' => 'Employment type deleted.']);
 }
 
