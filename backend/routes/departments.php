@@ -18,6 +18,7 @@ if ($method === 'GET') {
             LEFT   JOIN employees sup ON sup.employee_id = d.supervisor_id
             WHERE  1=1';
     $params = [];
+    $search = str($_GET, 'search');
     if ($search !== '') {
         $sql .= ' AND (d.department_name LIKE ? OR d.department_code LIKE ?)';
         $params[] = "%{$search}%";
