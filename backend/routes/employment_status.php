@@ -14,7 +14,7 @@ if ($method === 'GET') {
     $rows = getDB()->query(
         'SELECT es.*, COUNT(e.employee_id) AS employee_count
          FROM   employment_status es
-         LEFT   JOIN employees e ON e.employment_status = es.status_name
+         LEFT   JOIN employees e ON e.employment_status_id = es.employment_status_id
          GROUP  BY es.employment_status_id
          ORDER  BY es.status_name'
     )->fetchAll();
@@ -56,7 +56,7 @@ if ($method === 'DELETE') {
     $id = intVal_($_GET, 'id');
     if (!$id) json_err('id query param is required.');
     $pdo = getDB();
-    $emp = $pdo->prepare('SELECT COUNT(*) FROM employees WHERE employment_status = (SELECT status_name FROM employment_status WHERE employment_status_id = ?)');
+    $emp = $pdo->prepare('SELECT COUNT(*) FROM employees WHERE employment_status_id = ?');
     $emp->execute([$id]);
     if ((int)$emp->fetchColumn() > 0) json_err('Cannot delete a status that still has employees assigned.');
     $stmt = $pdo->prepare('DELETE FROM employment_status WHERE employment_status_id = ?');
