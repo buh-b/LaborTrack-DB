@@ -190,12 +190,18 @@ if ($method === 'PUT') {
 
     // Employees can never validate reports (enforced above by requireRole).
     $newStatusId = resolveValidationStatusId($pdo, $body, (int)$report['validation_status_id']);
-    if ($newStatusId === null || !in_array($newStatusId, [1, 2, 3], true)) {
-        json_err('validation_status_id must be Pending (1), Confirmed (2), or Dismissed (3).');
+
+    // Supervisors can only set Supervisor Approved (4) or Dismissed (3)
+    if ($level === 'supervisor' && $newStatusId !== null && !in_array($newStatusId, [3, 4], true)) {
+        json_err('Supervisors can only set status to Supervisor Approved or Dismissed.');
     }
 
-    $validatedAt = in_array($newStatusId, [2, 3], true) ? (new DateTime())->format('Y-m-d H:i:s') : null;
-    $validatedBy = in_array($newStatusId, [2, 3], true) ? currentAccountId() : null;
+    if ($newStatusId === null || !in_array($newStatusId, [1, 2, 3, 4], true)) {
+        json_err('validation_status_id must be Pending (1), Confirmed (2), Dismissed (3), or Supervisor Approved (4).');
+    }
+
+    $validatedAt = in_array($newStatusId, [2, 3, 4], true) ? (new DateTime())->format('Y-m-d H:i:s') : null;
+    $validatedBy = in_array($newStatusId, [2, 3, 4], true) ? currentAccountId() : null;
 
     $pdo->prepare(
         'UPDATE reports

@@ -17,7 +17,9 @@ const LOG_SELECT =
             CONCAT(e.first_name, " ", e.last_name) AS full_name,
             tl.status_id, ast.status_label,
             tl.work_date, tl.clock_in, tl.clock_out,
-            tl.break_minutes, tl.total_hours, tl.hours_valid,
+            tl.resumed_at,
+            tl.break_minutes, tl.total_hours, tl.accumulated_hours,
+            tl.hours_valid,
             tl.created_at, tl.updated_at
      FROM      time_logs tl
      JOIN      employees         e   ON e.employee_id = tl.employee_id
@@ -63,19 +65,21 @@ function isLateForSchedule(string $clockInDatetime, ?array $schedule): bool {
 
 function castLog(array $r): array {
     return [
-        'log_id'        => (int)$r['log_id'],
-        'employee_id'   => (int)$r['employee_id'],
-        'full_name'     => trim($r['full_name'] ?? '') ?: null,
-        'status_id'     => $r['status_id']     !== null ? (int)$r['status_id']     : null,
-        'status_label'  => $r['status_label']  ?? null,
-        'work_date'     => $r['work_date']     ?? null,
-        'clock_in'      => $r['clock_in'],
-        'clock_out'     => $r['clock_out'],
-        'break_minutes' => $r['break_minutes'] !== null ? (int)$r['break_minutes'] : 0,
-        'total_hours'   => $r['total_hours']   !== null ? (float)$r['total_hours']   : null,
-        'hours_valid'   => (bool)($r['hours_valid'] ?? true),
-        'created_at'    => $r['created_at'] ?? null,
-        'updated_at'    => $r['updated_at'] ?? null,
+        'log_id'            => (int)$r['log_id'],
+        'employee_id'       => (int)$r['employee_id'],
+        'full_name'         => trim($r['full_name'] ?? '') ?: null,
+        'status_id'         => $r['status_id']     !== null ? (int)$r['status_id']     : null,
+        'status_label'      => $r['status_label']  ?? null,
+        'work_date'         => $r['work_date']     ?? null,
+        'clock_in'          => $r['clock_in'],
+        'clock_out'         => $r['clock_out'],
+        'resumed_at'        => $r['resumed_at']    ?? null,
+        'break_minutes'     => $r['break_minutes'] !== null ? (int)$r['break_minutes'] : 0,
+        'total_hours'       => $r['total_hours']   !== null ? (float)$r['total_hours']   : null,
+        'accumulated_hours' => (float)($r['accumulated_hours'] ?? 0),
+        'hours_valid'       => (bool)($r['hours_valid'] ?? true),
+        'created_at'        => $r['created_at'] ?? null,
+        'updated_at'        => $r['updated_at'] ?? null,
     ];
 }
 
@@ -190,31 +194,57 @@ if ($method === 'GET' && $action === 'status') {
     ]);
 }
 
-// POST: clock in
+// POST: clock in (or resume after clock-out)
 if ($method === 'POST' && $action === 'clock_in') {
+    requireRole(['employee', 'supervisor']);
     $empId = currentEmployeeId();
     if ($empId === null) {
         json_err('No employee record linked to this account.', 403);
     }
 
     $today = (new DateTime())->format('Y-m-d');
+    $now   = (new DateTime())->format('Y-m-d H:i:s');
+
+    // Check if a log already exists for today
     $check = $pdo->prepare(
-        'SELECT log_id FROM time_logs
+        'SELECT log_id, clock_out, total_hours, accumulated_hours
+         FROM time_logs
          WHERE employee_id = ? AND work_date = ? LIMIT 1'
     );
     $check->execute([$empId, $today]);
-    if ($check->fetch()) {
-        json_err('You have already clocked in today. Only one clock-in is allowed per day.');
+    $existing = $check->fetch();
+
+    if ($existing) {
+        // Log exists — check if it's still open
+        if ($existing['clock_out'] === null) {
+            json_err('You are already clocked in.');
+        }
+
+        // Log exists with clock_out set — RESUME the same row
+        $prevTotal   = (float)($existing['total_hours'] ?? 0);
+        $accumulated = (float)($existing['accumulated_hours'] ?? 0);
+        $newAccumulated = $accumulated + $prevTotal;
+
+        $pdo->prepare(
+            'UPDATE time_logs
+             SET clock_out = NULL, total_hours = NULL,
+                 resumed_at = ?, accumulated_hours = ?
+             WHERE log_id = ?'
+        )->execute([$now, $newAccumulated, (int)$existing['log_id']]);
+
+        $sel = $pdo->prepare(LOG_SELECT . ' WHERE tl.log_id = ?');
+        $sel->execute([(int)$existing['log_id']]);
+        json_ok(castLog($sel->fetch()));
     }
 
+    // No log for today — fresh clock-in
     $schedule     = fetchEmployeeSchedule($pdo, $empId);
     $breakMinutes = $schedule ? (int)($schedule['break_minutes'] ?? 0) : 0;
-    $now          = (new DateTime())->format('Y-m-d H:i:s');
     $statusId     = isLateForSchedule($now, $schedule) ? 2 : 1;
 
     $pdo->prepare(
-        'INSERT INTO time_logs (employee_id, status_id, work_date, clock_in, break_minutes, hours_valid)
-         VALUES (?, ?, ?, ?, ?, 1)'
+        'INSERT INTO time_logs (employee_id, status_id, work_date, clock_in, break_minutes, hours_valid, accumulated_hours)
+         VALUES (?, ?, ?, ?, ?, 1, 0)'
     )->execute([$empId, $statusId, $today, $now, $breakMinutes]);
 
     $logId = (int)$pdo->lastInsertId();
@@ -225,6 +255,7 @@ if ($method === 'POST' && $action === 'clock_in') {
 
 // POST: clock out
 if ($method === 'POST' && $action === 'clock_out') {
+    requireRole(['employee', 'supervisor']);
     $empId = currentEmployeeId();
     if ($empId === null) {
         json_err('No employee record linked to this account.', 403);
@@ -232,7 +263,7 @@ if ($method === 'POST' && $action === 'clock_out') {
 
     $today = (new DateTime())->format('Y-m-d');
     $sel   = $pdo->prepare(
-        'SELECT log_id, clock_in, break_minutes
+        'SELECT log_id, clock_in, break_minutes, resumed_at, accumulated_hours
          FROM   time_logs
          WHERE  employee_id = ? AND work_date = ? AND clock_out IS NULL
          LIMIT  1'
@@ -243,9 +274,21 @@ if ($method === 'POST' && $action === 'clock_out') {
         json_err('No open clock-in found for today.');
     }
 
-    $clockOut     = (new DateTime())->format('Y-m-d H:i:s');
-    $breakMinutes = (int)($log['break_minutes'] ?? 0);
-    $totalHours   = computeTotalHours($log['clock_in'], $clockOut, $breakMinutes);
+    $clockOut        = (new DateTime())->format('Y-m-d H:i:s');
+    $accumulated     = (float)($log['accumulated_hours'] ?? 0);
+    $isResumed       = !empty($log['resumed_at']);
+
+    // For resumed sessions, compute hours from resumed_at (no break deduction;
+    // break was already accounted for in the first session).
+    // For first sessions, compute from clock_in with break deduction.
+    if ($isResumed) {
+        $sessionHours = computeTotalHours($log['resumed_at'], $clockOut, 0);
+    } else {
+        $breakMinutes = (int)($log['break_minutes'] ?? 0);
+        $sessionHours = computeTotalHours($log['clock_in'], $clockOut, $breakMinutes);
+    }
+
+    $totalHours = round($accumulated + $sessionHours, 2);
 
     $pdo->prepare(
         'UPDATE time_logs

@@ -26,6 +26,9 @@ const CLAIM_SELECT =
      LEFT JOIN accounts cb ON cb.account_id = c.claimed_by_account_id
      LEFT JOIN accounts vb ON vb.account_id = c.validated_by_account_id';
 
+// Note: c.requested_clock_in, c.requested_clock_out, c.requested_hours are
+// already included via c.* in the SELECT.
+
 function castClaim(array $r): array {
     return [
         'claim_id'                 => (int)$r['claim_id'],
@@ -36,6 +39,9 @@ function castClaim(array $r): array {
         'holiday_hours'            => $r['holiday_hours']  !== null ? (float)$r['holiday_hours']  : null,
         'overtime_hours'           => $r['overtime_hours'] !== null ? (float)$r['overtime_hours'] : null,
         'remarks'                  => $r['remarks'],
+        'requested_clock_in'       => $r['requested_clock_in']  ?? null,
+        'requested_clock_out'      => $r['requested_clock_out'] ?? null,
+        'requested_hours'          => $r['requested_hours'] !== null ? (float)$r['requested_hours'] : null,
         'validation_status_id'     => (int)$r['validation_status_id'],
         'validated_by_account_id'  => $r['validated_by_account_id'] !== null ? (int)$r['validated_by_account_id'] : null,
         'resolution_remarks'       => $r['resolution_remarks'],
@@ -167,9 +173,6 @@ if ($method === 'POST') {
 
     $level = currentAccessLevel();
     if (!in_array($level, ['system_admin', 'human_resources'], true)) {
-        if ($level === 'supervisor') {
-            json_err('Supervisors cannot file claims on behalf of employees.', 403);
-        }
         if ((int)$log['employee_id'] !== currentEmployeeId()) {
             json_err('You can only file claims for your own time logs.', 403);
         }
@@ -181,15 +184,29 @@ if ($method === 'POST') {
     $holidayHours = array_key_exists('holiday_hours', $body)
         ? floatVal_($body, 'holiday_hours')
         : null;
+    $requestedClockIn  = str($body, 'requested_clock_in') ?: null;
+    $requestedClockOut = str($body, 'requested_clock_out') ?: null;
+    $requestedHours    = array_key_exists('requested_hours', $body)
+        ? floatVal_($body, 'requested_hours')
+        : null;
 
-    if (($overtimeHours === null || $overtimeHours <= 0) && ($holidayHours === null || $holidayHours <= 0)) {
-        json_err('At least one of overtime_hours or holiday_hours must be greater than 0.');
+    $hasOvertime     = $overtimeHours !== null && $overtimeHours > 0;
+    $hasHoliday      = $holidayHours !== null && $holidayHours > 0;
+    $hasTimeRequest  = ($requestedHours !== null && $requestedHours > 0)
+                       || $requestedClockIn !== null
+                       || $requestedClockOut !== null;
+
+    if (!$hasOvertime && !$hasHoliday && !$hasTimeRequest) {
+        json_err('At least one of overtime_hours, holiday_hours, or time correction fields must be provided.');
     }
     if ($overtimeHours !== null && $overtimeHours < 0) {
         json_err('overtime_hours cannot be negative.');
     }
     if ($holidayHours !== null && $holidayHours < 0) {
         json_err('holiday_hours cannot be negative.');
+    }
+    if ($requestedHours !== null && $requestedHours < 0) {
+        json_err('requested_hours cannot be negative.');
     }
 
     $pendingCheck = $pdo->prepare(
@@ -204,16 +221,21 @@ if ($method === 'POST') {
     $pdo->prepare(
         'INSERT INTO time_log_claims
             (log_id, claimed_by_account_id, overtime_category_id, holiday_id,
-             holiday_hours, overtime_hours, remarks, validation_status_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1)'
+             holiday_hours, overtime_hours, remarks,
+             requested_clock_in, requested_clock_out, requested_hours,
+             validation_status_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)'
     )->execute([
         $logId,
         currentAccountId(),
         intVal_($body, 'overtime_category_id') ?: null,
         intVal_($body, 'holiday_id')           ?: null,
-        ($holidayHours !== null && $holidayHours > 0) ? $holidayHours : null,
-        ($overtimeHours !== null && $overtimeHours > 0) ? $overtimeHours : null,
+        $hasHoliday  ? $holidayHours  : null,
+        $hasOvertime ? $overtimeHours : null,
         str($body, 'remarks') ?: null,
+        $requestedClockIn,
+        $requestedClockOut,
+        ($requestedHours !== null && $requestedHours > 0) ? $requestedHours : null,
     ]);
 
     $claimId = (int)$pdo->lastInsertId();
@@ -255,19 +277,27 @@ if ($method === 'PUT') {
             }
         }
 
+        // Supervisors can only set Supervisor Approved (4) or Rejected (3)
+        if ($level === 'supervisor') {
+            $newStatusId = resolveValidationStatusId($pdo, $body, (int)$claim['validation_status_id']);
+            if ($newStatusId !== null && !in_array($newStatusId, [3, 4], true)) {
+                json_err('Supervisors can only set status to Supervisor Approved or Rejected.');
+            }
+        }
+
         $newStatusId = resolveValidationStatusId(
             $pdo,
             $body,
             (int)$claim['validation_status_id']
         );
-        if ($newStatusId === null || !in_array($newStatusId, [1, 2, 3], true)) {
-            json_err('validation_status_id must be Pending (1), Approved (2), or Rejected (3).');
+        if ($newStatusId === null || !in_array($newStatusId, [1, 2, 3, 4], true)) {
+            json_err('validation_status_id must be Pending (1), Approved (2), Rejected (3), or Supervisor Approved (4).');
         }
 
-        $validatedAt = in_array($newStatusId, [2, 3], true)
+        $validatedAt = in_array($newStatusId, [2, 3, 4], true)
             ? (new DateTime())->format('Y-m-d H:i:s')
             : null;
-        $validatedBy = in_array($newStatusId, [2, 3], true)
+        $validatedBy = in_array($newStatusId, [2, 3, 4], true)
             ? currentAccountId()
             : null;
 
@@ -283,6 +313,69 @@ if ($method === 'PUT') {
             $validatedAt,
             $claimId,
         ]);
+
+        // Auto-apply time corrections when approving
+        if ($newStatusId === 2) {
+            $logId        = (int)$claim['log_id'];
+            $reqClockIn   = $claim['requested_clock_in']  ?? null;
+            $reqClockOut  = $claim['requested_clock_out'] ?? null;
+            $reqHours     = $claim['requested_hours']     !== null ? (float)$claim['requested_hours'] : null;
+
+            if ($reqClockIn !== null || $reqClockOut !== null || $reqHours !== null) {
+                // Fetch the current time log
+                $tlStmt = $pdo->prepare('SELECT * FROM time_logs WHERE log_id = ? LIMIT 1');
+                $tlStmt->execute([$logId]);
+                $tl = $tlStmt->fetch();
+
+                if ($tl) {
+                    $updFields = [];
+                    $updParams = [];
+
+                    $ciStr = $reqClockIn  ?? $tl['clock_in'];
+                    $coStr = $reqClockOut ?? $tl['clock_out'];
+
+                    if ($reqClockIn !== null) {
+                        $updFields[] = 'clock_in = ?';
+                        $updParams[] = $reqClockIn;
+                    }
+                    if ($reqClockOut !== null) {
+                        $updFields[] = 'clock_out = ?';
+                        $updParams[] = $reqClockOut;
+                    }
+
+                    // Recompute total_hours if clock times changed
+                    if (($reqClockIn !== null || $reqClockOut !== null) && $ciStr && $coStr) {
+                        $brk = (int)($tl['break_minutes'] ?? 0);
+                        $ci  = new DateTime($ciStr);
+                        $co  = new DateTime($coStr);
+                        $raw = ($co->getTimestamp() - $ci->getTimestamp()) / 3600;
+                        $newTotal = round(max(0.0, $raw - ($brk / 60)), 2);
+                        $updFields[] = 'total_hours = ?';
+                        $updParams[] = $newTotal;
+                    }
+
+                    // Add requested_hours to total_hours
+                    if ($reqHours !== null && $reqHours > 0) {
+                        if (in_array('total_hours = ?', $updFields, true)) {
+                            // Already recomputed — add on top
+                            $lastIdx = count($updParams) - 1;
+                            $updParams[$lastIdx] = round((float)$updParams[$lastIdx] + $reqHours, 2);
+                        } else {
+                            $currentTotal = (float)($tl['total_hours'] ?? 0);
+                            $updFields[] = 'total_hours = ?';
+                            $updParams[] = round($currentTotal + $reqHours, 2);
+                        }
+                    }
+
+                    if (!empty($updFields)) {
+                        $updParams[] = $logId;
+                        $pdo->prepare(
+                            'UPDATE time_logs SET ' . implode(', ', $updFields) . ' WHERE log_id = ?'
+                        )->execute($updParams);
+                    }
+                }
+            }
+        }
 
         logAudit($pdo, 'claim_validation', 'time_log_claim', $claimId, [
             'from_status_id' => (int)$claim['validation_status_id'],
@@ -307,11 +400,21 @@ if ($method === 'PUT') {
     $holidayHours = array_key_exists('holiday_hours', $body)
         ? floatVal_($body, 'holiday_hours')
         : ($claim['holiday_hours'] !== null ? (float)$claim['holiday_hours'] : null);
+    $requestedClockIn  = array_key_exists('requested_clock_in', $body)
+        ? (str($body, 'requested_clock_in') ?: null)
+        : ($claim['requested_clock_in'] ?? null);
+    $requestedClockOut = array_key_exists('requested_clock_out', $body)
+        ? (str($body, 'requested_clock_out') ?: null)
+        : ($claim['requested_clock_out'] ?? null);
+    $requestedHours = array_key_exists('requested_hours', $body)
+        ? floatVal_($body, 'requested_hours')
+        : ($claim['requested_hours'] !== null ? (float)$claim['requested_hours'] : null);
 
     $pdo->prepare(
         'UPDATE time_log_claims
          SET overtime_category_id = ?, holiday_id = ?, holiday_hours = ?,
-             overtime_hours = ?, remarks = ?
+             overtime_hours = ?, remarks = ?,
+             requested_clock_in = ?, requested_clock_out = ?, requested_hours = ?
          WHERE claim_id = ?'
     )->execute([
         intVal_($body, 'overtime_category_id') ?: ($claim['overtime_category_id'] ?: null),
@@ -319,6 +422,9 @@ if ($method === 'PUT') {
         ($holidayHours !== null && $holidayHours > 0) ? $holidayHours : null,
         ($overtimeHours !== null && $overtimeHours > 0) ? $overtimeHours : null,
         str($body, 'remarks', $claim['remarks'] ?? ''),
+        $requestedClockIn,
+        $requestedClockOut,
+        ($requestedHours !== null && $requestedHours > 0) ? $requestedHours : null,
         $claimId,
     ]);
 
