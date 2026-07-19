@@ -59,7 +59,7 @@ if ($method === 'GET') {
 
 // POST — record exit
 if ($method === 'POST') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $body = bodyJson();
     
     $employeeId = intVal_($body, 'employee_id');
@@ -141,7 +141,7 @@ if ($method === 'POST') {
 
 // PUT — update exit details
 if ($method === 'PUT') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $body = bodyJson();
     
     $id        = intVal_($body, 'exit_id');
@@ -179,7 +179,7 @@ if ($method === 'PUT') {
 
 // DELETE — delete exit record
 if ($method === 'DELETE') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $id = intVal_($_GET, 'id');
     if (!$id) {
         json_err('id query param is required.');
@@ -195,3 +195,4 @@ if ($method === 'DELETE') {
 }
 
 json_err('Method not allowed.', 405);
+

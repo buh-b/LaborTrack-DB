@@ -97,7 +97,7 @@ if ($method === 'GET') {
         json_ok(castClaim($row));
     }
 
-    if (in_array($level, ['system_admin', 'payroll_admin'], true)) {
+    if (in_array($level, ['system_admin', 'human_resources'], true)) {
         if (!empty($_GET['employee_id'])) {
             $where[]  = 'tl.employee_id = ?';
             $params[] = (int)$_GET['employee_id'];
@@ -166,7 +166,7 @@ if ($method === 'POST') {
     }
 
     $level = currentAccessLevel();
-    if (!in_array($level, ['system_admin', 'payroll_admin'], true)) {
+    if (!in_array($level, ['system_admin', 'human_resources'], true)) {
         if ($level === 'supervisor') {
             json_err('Supervisors cannot file claims on behalf of employees.', 403);
         }
@@ -242,7 +242,7 @@ if ($method === 'PUT') {
 
     $level = currentAccessLevel();
 
-    if (in_array($level, ['system_admin', 'payroll_admin', 'supervisor'], true)) {
+    if (in_array($level, ['system_admin', 'human_resources', 'supervisor'], true)) {
         if ($level === 'supervisor') {
             $deptStmt = $pdo->prepare('SELECT department_id FROM employees WHERE employee_id = ?');
             $deptStmt->execute([(int)$claim['employee_id']]);
@@ -344,7 +344,7 @@ if ($method === 'DELETE') {
     }
 
     $level = currentAccessLevel();
-    if (!in_array($level, ['system_admin', 'payroll_admin'], true)) {
+    if (!in_array($level, ['system_admin', 'human_resources'], true)) {
         if ((int)$claim['employee_id'] !== currentEmployeeId()) {
             json_err('Forbidden.', 403);
         }
@@ -360,7 +360,7 @@ if ($method === 'DELETE') {
 json_err('Method not allowed.', 405);
 
 function canViewClaim(PDO $pdo, array $claim, ?string $level): bool {
-    if (in_array($level, ['system_admin', 'payroll_admin'], true)) {
+    if (in_array($level, ['system_admin', 'human_resources'], true)) {
         return true;
     }
     if ($level === 'supervisor') {
@@ -373,3 +373,4 @@ function canViewClaim(PDO $pdo, array $claim, ?string $level): bool {
 
     return (int)$claim['employee_id'] === currentEmployeeId();
 }
+

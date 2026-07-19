@@ -62,7 +62,7 @@ if ($method === 'GET') {
     if (isset($_GET['id'])) {
         $id = (int)$_GET['id'];
         $level = currentAccessLevel();
-        $isPrivileged = in_array($level, ['system_admin', 'payroll_admin'], true);
+        $isPrivileged = in_array($level, ['system_admin', 'human_resources'], true);
         if (!$isPrivileged && $id !== currentEmployeeId()) {
             if ($level === 'supervisor') {
                 $chk = $pdo->prepare('SELECT department_id FROM employees WHERE employee_id = ?');
@@ -88,7 +88,7 @@ if ($method === 'GET') {
 
     $level = currentAccessLevel();
 
-    if (in_array($level, ['system_admin', 'payroll_admin'], true)) {
+    if (in_array($level, ['system_admin', 'human_resources'], true)) {
         $where  = [];
         $params = [];
         if (!empty($_GET['search'])) {
@@ -131,7 +131,7 @@ if ($method === 'GET') {
 
 // POST: create
 if ($method === 'POST') {
-    requirePayrollAdmin();
+    requireHumanResources();
 
     $body = bodyJson();
     [$firstName, $lastName] = parseEmployeeNames($body);
@@ -197,7 +197,7 @@ if ($method === 'POST') {
 
 // PUT: update
 if ($method === 'PUT') {
-    requirePayrollAdmin();
+    requireHumanResources();
 
     $body = bodyJson();
     $id   = intVal_($body, 'employee_id');
@@ -339,3 +339,4 @@ function castEmployee(array $r): array {
         'role_name'             => $r['role_name']             ?? null,
     ];
 }
+

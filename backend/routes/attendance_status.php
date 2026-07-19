@@ -24,3 +24,4 @@ foreach ($rows as &$r) {
 unset($r);
 
 json_ok($rows);
+

@@ -113,7 +113,7 @@ if ($method === 'GET') {
     $params = [];
     $level  = currentAccessLevel();
 
-    if (in_array($level, ['system_admin', 'payroll_admin'], true)) {
+    if (in_array($level, ['system_admin', 'human_resources'], true)) {
         if (!empty($_GET['employee_id'])) {
             $where[]  = 'lr.employee_id = ?';
             $params[] = (int)$_GET['employee_id'];
@@ -180,7 +180,7 @@ if ($method === 'GET') {
 if ($method === 'POST') {
     requireAuth();
     $body       = bodyJson();
-    $employeeId = in_array(currentAccessLevel(), ['system_admin', 'payroll_admin'], true)
+    $employeeId = in_array(currentAccessLevel(), ['system_admin', 'human_resources'], true)
                   ? intVal_($body, 'employee_id', currentEmployeeId())
                   : currentEmployeeId();
     $leaveTypeId = resolveLeaveTypeId($pdo = getDB(), $body);
@@ -259,7 +259,7 @@ if ($method === 'PUT') {
 
     $level = currentAccessLevel();
 
-    if (in_array($level, ['system_admin', 'payroll_admin', 'supervisor'], true)) {
+    if (in_array($level, ['system_admin', 'human_resources', 'supervisor'], true)) {
         if ($level === 'supervisor') {
             if ((int)$leave['department_id'] !== currentDepartmentId()) {
                 json_err('Forbidden.', 403);
@@ -455,7 +455,7 @@ if ($method === 'DELETE') {
         json_err('Leave record not found.', 404);
     }
 
-    $isAdmin = in_array(currentAccessLevel(), ['system_admin', 'payroll_admin'], true);
+    $isAdmin = in_array(currentAccessLevel(), ['system_admin', 'human_resources'], true);
 
     if (!$isAdmin) {
         if ((int)$leave['employee_id'] !== currentEmployeeId()) {
@@ -498,3 +498,4 @@ function castLeave(array $r): array {
         'full_name'              => trim($r['full_name'] ?? '') ?: null,
     ];
 }
+

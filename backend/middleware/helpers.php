@@ -81,7 +81,7 @@ function floatVal_(array $body, string $key, float $default = 0.0): float {
 }
 
 // Auth helpers 
-// access_level is one of: employee, supervisor, payroll_admin, system_admin
+// access_level is one of: employee, supervisor, human_resources, system_admin
 function isLoggedIn(): bool            { return isset($_SESSION['account_id']); }
 function currentAccountId(): ?int      { return $_SESSION['account_id']   ?? null; }
 function currentEmployeeId(): ?int     { return $_SESSION['employee_id']  ?? null; }
@@ -126,13 +126,13 @@ function requireSupervisor(): void {
     requireRole(['supervisor', 'system_admin']);
 }
 
-function requirePayrollAdmin(): void {
-    requireRole(['payroll_admin', 'system_admin']);
+function requireHumanResources(): void {
+    requireRole(['human_resources', 'system_admin']);
 }
 
 // Kept as an alias for any call site still using the old 2-tier name.
 // Treated as System Admin only — replace call sites with the more specific
-// requireSystemAdmin() / requirePayrollAdmin() / requireSupervisor() over time.
+// requireSystemAdmin() / requireHumanResources() / requireSupervisor() over time.
 function requireAdmin(): void {
     requireSystemAdmin();
 }

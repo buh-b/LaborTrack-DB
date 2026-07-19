@@ -107,3 +107,4 @@ if ($method === 'POST' && $action === 'change_password') {
 }
 
 json_err('Not found.', 404);
+

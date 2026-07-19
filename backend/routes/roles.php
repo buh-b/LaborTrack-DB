@@ -62,3 +62,4 @@ if ($method === 'DELETE') {
 }
 
 json_err('Method not allowed.', 405);
+

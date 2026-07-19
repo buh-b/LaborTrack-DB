@@ -23,7 +23,7 @@ if ($method === 'GET') {
 
 // create cat
 if ($method === 'POST') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $body = bodyJson();
     $name = str($body, 'category_name');
     if ($name === '') {
@@ -43,7 +43,7 @@ if ($method === 'POST') {
 
 // update cat
 if ($method === 'PUT') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $body = bodyJson();
     $id   = intVal_($body, 'overtime_category_id');
     $name = str($body, 'category_name');
@@ -67,7 +67,7 @@ if ($method === 'PUT') {
 
 // delete cat
 if ($method === 'DELETE') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $id = intVal_($_GET, 'id');
     if (!$id) {
         json_err('id query param is required.');
@@ -93,3 +93,4 @@ if ($method === 'DELETE') {
 }
 
 json_err('Method not allowed.', 405);
+

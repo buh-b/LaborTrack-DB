@@ -25,7 +25,7 @@ if ($method === 'GET') {
 
 // POST — create
 if ($method === 'POST') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $body  = bodyJson();
     $name  = str($body, 'differential_name');
     $start = str($body, 'time_start');
@@ -45,7 +45,7 @@ if ($method === 'POST') {
 
 // PUT — update
 if ($method === 'PUT') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $body  = bodyJson();
     $id    = intVal_($body, 'differential_id');
     $name  = str($body, 'differential_name');
@@ -69,7 +69,7 @@ if ($method === 'PUT') {
 
 // DELETE
 if ($method === 'DELETE') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $id = intVal_($_GET, 'id');
     if (!$id) json_err('id query param is required.');
     $stmt = getDB()->prepare('DELETE FROM pay_differentials WHERE differential_id = ?');

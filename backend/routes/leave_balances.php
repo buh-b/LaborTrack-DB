@@ -16,7 +16,7 @@ if ($method === 'GET') {
     $where = [];
     $params = [];
 
-    if (in_array($level, ['system_admin', 'payroll_admin'], true)) {
+    if (in_array($level, ['system_admin', 'human_resources'], true)) {
         if (!empty($_GET['employee_id'])) {
             $where[] = 'lb.employee_id = ?';
             $params[] = (int)$_GET['employee_id'];
@@ -86,7 +86,7 @@ if ($method === 'GET') {
 // previous year's remaining/unused entitlement, per employee + leave type.
 // Skips any employee/type/year combo that already has a balance row.
 if ($method === 'POST' && ($_GET['action'] ?? '') === 'rollover') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $body     = bodyJson();
     $fromYear = intVal_($body, 'from_year');
     $toYear   = intVal_($body, 'to_year');
@@ -161,7 +161,7 @@ if ($method === 'POST' && ($_GET['action'] ?? '') === 'rollover') {
 
 // POST — create
 if ($method === 'POST') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $body = bodyJson();
     
     $employeeId  = intVal_($body, 'employee_id');
@@ -224,7 +224,7 @@ if ($method === 'POST') {
 
 // PUT — update
 if ($method === 'PUT') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $body = bodyJson();
     
     $id          = intVal_($body, 'balance_id');
@@ -270,7 +270,7 @@ if ($method === 'PUT') {
 
 // DELETE
 if ($method === 'DELETE') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $id = intVal_($_GET, 'id');
     if (!$id) {
         json_err('id query param is required.');
@@ -289,3 +289,4 @@ if ($method === 'DELETE') {
 }
 
 json_err('Method not allowed.', 405);
+

@@ -85,7 +85,7 @@ if ($method === 'GET' && $action === '') {
     $params = [];
     $level  = currentAccessLevel();
 
-    if (in_array($level, ['system_admin', 'payroll_admin'], true)) {
+    if (in_array($level, ['system_admin', 'human_resources'], true)) {
         if (!empty($_GET['employee_id'])) {
             $where[]  = 'tl.employee_id = ?';
             $params[] = (int)$_GET['employee_id'];
@@ -260,7 +260,7 @@ if ($method === 'POST' && $action === 'clock_out') {
 
 // PUT: admin edit
 if ($method === 'PUT') {
-    requirePayrollAdmin();
+    requireHumanResources();
 
     $body  = bodyJson();
     $logId = intVal_($body, 'log_id');
@@ -355,3 +355,4 @@ if ($method === 'PUT') {
 }
 
 json_err('Not found.', 404);
+

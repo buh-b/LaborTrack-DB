@@ -22,7 +22,7 @@ if ($method === 'GET') {
 
 // POST — create
 if ($method === 'POST') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $body = bodyJson();
     $name = str($body, 'status_name');
     if ($name === '') json_err('status_name is required.');
@@ -33,7 +33,7 @@ if ($method === 'POST') {
 
 // PUT — update
 if ($method === 'PUT') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $body = bodyJson();
     $id   = intVal_($body, 'validation_status_id');
     $name = str($body, 'status_name');
@@ -47,7 +47,7 @@ if ($method === 'PUT') {
 
 // DELETE
 if ($method === 'DELETE') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $id = intVal_($_GET, 'id');
     if (!$id) json_err('id query param is required.');
     $stmt = getDB()->prepare('DELETE FROM validation_status WHERE validation_status_id = ?');

@@ -55,8 +55,8 @@ if ($method === 'POST') {
     if ($username === '')  json_err('username is required.');
     if ($password === '')  json_err('password is required.');
     if ($email === '')     json_err('email is required.');
-    if (!in_array($accessLevel, ['employee', 'supervisor', 'payroll_admin', 'system_admin'], true)) {
-        json_err('access_level must be employee, supervisor, payroll_admin, or system_admin.');
+    if (!in_array($accessLevel, ['employee', 'supervisor', 'human_resources', 'system_admin'], true)) {
+        json_err('access_level must be employee, supervisor, human_resources, or system_admin.');
     }
     if (strlen($password) < 6) json_err('Password must be at least 6 characters.');
 
@@ -137,7 +137,7 @@ if ($method === 'PUT') {
         $fields[] = 'email = ?'; $params[] = $email;
         if ($email !== $before['email']) $changed['email'] = ['from' => $before['email'], 'to' => $email];
     }
-    if ($accessLevel !== '' && in_array($accessLevel, ['employee', 'supervisor', 'payroll_admin', 'system_admin'], true)) {
+    if ($accessLevel !== '' && in_array($accessLevel, ['employee', 'supervisor', 'human_resources', 'system_admin'], true)) {
         $fields[] = 'access_level = ?'; $params[] = $accessLevel;
         if ($accessLevel !== $before['access_level']) $changed['access_level'] = ['from' => $before['access_level'], 'to' => $accessLevel];
     }

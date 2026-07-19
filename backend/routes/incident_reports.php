@@ -76,7 +76,7 @@ function resolveValidationStatusId(PDO $pdo, array $body, ?int $fallback = null)
 
 function canViewReport(PDO $pdo, array $report, ?string $level): bool {
     // System Admin / Payroll Admin (HR) can see everything.
-    if (in_array($level, ['system_admin', 'payroll_admin'], true)) {
+    if (in_array($level, ['system_admin', 'human_resources'], true)) {
         return true;
     }
     if ($level === 'supervisor') {
@@ -103,7 +103,7 @@ if ($method === 'GET') {
     $where  = [];
     $params = [];
 
-    if (in_array($level, ['system_admin', 'payroll_admin'], true)) {
+    if (in_array($level, ['system_admin', 'human_resources'], true)) {
         if (!empty($_GET['validation_status_id'])) {
             $where[]  = 'r.validation_status_id = ?';
             $params[] = (int)$_GET['validation_status_id'];
@@ -167,7 +167,7 @@ if ($method === 'POST') {
 // PUT — validate (confirm/dismiss) a report. Reports are immutable after
 // submission except by the validator (Supervisor / HR / Admin).
 if ($method === 'PUT') {
-    requireRole(['supervisor', 'payroll_admin', 'system_admin']);
+    requireRole(['supervisor', 'human_resources', 'system_admin']);
 
     $body     = bodyJson();
     $reportId = intVal_($body, 'report_id');
@@ -220,3 +220,4 @@ if ($method === 'PUT') {
 }
 
 json_err('Method not allowed.', 405);
+

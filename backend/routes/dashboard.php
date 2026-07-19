@@ -222,7 +222,7 @@ function buildAdminDashboard(PDO $pdo, string $today, ?int $deptId): array {
 $level = currentAccessLevel();
 
 // SYSTEM ADMIN / PAYROLL ADMIN — company-wide dashboard
-if (in_array($level, ['system_admin', 'payroll_admin'], true)) {
+if (in_array($level, ['system_admin', 'human_resources'], true)) {
     json_ok(buildAdminDashboard($pdo, $today, null));
 }
 
@@ -386,3 +386,4 @@ json_ok([
     'pending_claims'             => $pendingClaims,
     'pending_reports'            => $pendingReports,
 ]);
+

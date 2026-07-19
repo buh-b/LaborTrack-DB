@@ -137,3 +137,4 @@ function castLeaveType(array $r): array {
                                  : 15.0,
     ];
 }
+

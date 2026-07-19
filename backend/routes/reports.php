@@ -16,7 +16,7 @@ require_once __DIR__ . '/../middleware/helpers.php';
 header('Content-Type: application/json');
 
 requireAuth();
-requirePayrollAdmin();
+requireHumanResources();
 
 $pdo    = getDB();
 $method = $_SERVER['REQUEST_METHOD'];
@@ -131,3 +131,4 @@ if ($action === 'employee_earnings') {
 }
 
 json_err('Not found.', 404);
+

@@ -34,7 +34,7 @@ if ($method === 'GET') {
 
 // POST — create
 if ($method === 'POST') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $body = bodyJson();
     $date = str($body, 'holiday_date');
     $name = str($body, 'holiday_name');
@@ -76,7 +76,7 @@ if ($method === 'POST') {
 
 // PUT — update
 if ($method === 'PUT') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $body = bodyJson();
     $id   = intVal_($body, 'holiday_id');
     $date = str($body, 'holiday_date');
@@ -128,7 +128,7 @@ if ($method === 'PUT') {
 
 // DELETE
 if ($method === 'DELETE') {
-    requirePayrollAdmin();
+    requireHumanResources();
     $id = intVal_($_GET, 'id');
     if (!$id) {
         json_err('id query param is required.');
@@ -146,3 +146,4 @@ if ($method === 'DELETE') {
 }
 
 json_err('Method not allowed.', 405);
+
